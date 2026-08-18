@@ -32,7 +32,7 @@ class ToggleTimerAction : ActionCallback {
                 prefs.isWorking = true
                 prefs.currentSessionStart = System.currentTimeMillis()
                 prefs.currentSessionId = id
-                context.startService(Intent(context, WorkTimerService::class.java))
+                context.startForegroundService(Intent(context, WorkTimerService::class.java))
             }
         }
 
