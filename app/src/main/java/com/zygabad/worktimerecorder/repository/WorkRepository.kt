@@ -15,6 +15,9 @@ class WorkRepository(private val dao: WorkDao) {
     fun getWeekSessions(weekStart: LocalDate): Flow<List<WorkSession>> =
         dao.getSessionsForWeek(weekStart.format(fmt), weekStart.plusDays(6).format(fmt))
 
+    fun getMonthSessions(monthStart: LocalDate): Flow<List<WorkSession>> =
+        dao.getSessionsForWeek(monthStart.format(fmt), monthStart.plusMonths(1).minusDays(1).format(fmt))
+
     suspend fun startSession(): Long {
         val session = WorkSession(
             date = LocalDate.now().format(fmt),

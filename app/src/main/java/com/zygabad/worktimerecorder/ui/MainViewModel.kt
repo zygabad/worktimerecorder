@@ -33,11 +33,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
     val weekStart: StateFlow<LocalDate> = _weekStart
 
+    private val _monthStart = MutableStateFlow(LocalDate.now().withDayOfMonth(1))
+    val monthStart: StateFlow<LocalDate> = _monthStart
+
     val todaySessions = repo.getTodaySessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val weekSessions: StateFlow<List<WorkSession>> = _weekStart.flatMapLatest {
         repo.getWeekSessions(it)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val monthSessions: StateFlow<List<WorkSession>> = _monthStart.flatMapLatest {
+        repo.getMonthSessions(it)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
@@ -122,5 +129,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val end = weekStart.plusDays(6)
         val fmtShort = DateTimeFormatter.ofPattern("d MMM", Locale("pl"))
         return "${weekStart.format(fmtShort)} – ${end.format(fmtShort)}"
+    }
+
+    fun previousMonth() { _monthStart.value = _monthStart.value.minusMonths(1) }
+
+    fun nextMonth() {
+        val next = _monthStart.value.plusMonths(1)
+        val thisMonth = LocalDate.now().withDayOfMonth(1)
+        if (!next.isAfter(thisMonth)) _monthStart.value = next
+    }
+
+    fun getMonthLabel(monthStart: LocalDate): String {
+        val fmtMonth = DateTimeFormatter.ofPattern("LLLL yyyy", Locale("pl"))
+        return monthStart.format(fmtMonth)
     }
 }

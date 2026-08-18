@@ -29,6 +29,8 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val todaySessions by vm.todaySessions.collectAsState()
     val weekSessions by vm.weekSessions.collectAsState()
     val weekStart by vm.weekStart.collectAsState()
+    val monthSessions by vm.monthSessions.collectAsState()
+    val monthStart by vm.monthStart.collectAsState()
     val todayMinutes = vm.getTodayTotalMinutes(todaySessions)
     val targetMinutes = vm.prefs.targetWorkMinutes
     val remainingMinutes = (targetMinutes - todayMinutes).coerceAtLeast(0)
@@ -165,6 +167,101 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                     }
                 }
             }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            IconButton(onClick = { vm.previousMonth() }) {
+                                Icon(Icons.Default.ChevronLeft, "Poprzedni miesiąc")
+                            }
+                            Text(
+                                text = vm.getMonthLabel(monthStart).replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(onClick = { vm.nextMonth() }) {
+                                Icon(Icons.Default.ChevronRight, "Następny miesiąc")
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        MonthlyTable(monthStart, monthSessions, vm)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainViewModel) {
+    val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val dayNames = listOf("Pon", "Wto", "Śro", "Czw", "Pią", "Sob", "Nie")
+    val today = LocalDate.now()
+    val daysInMonth = monthStart.lengthOfMonth()
+
+    val rows = (0 until daysInMonth).map { i ->
+        val date = monthStart.plusDays(i.toLong())
+        date to vm.getDayMinutes(date.format(fmt), sessions)
+    }.filter { (date, minutes) -> minutes > 0 || !date.isAfter(today) }
+
+    val workedDays = rows.count { it.second > 0 }
+    val totalMinutes = rows.sumOf { it.second }
+    val avgMinutes = if (workedDays > 0) totalMinutes / workedDays else 0
+
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Data", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1.4f))
+            Text("Dzień", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f))
+            Text("Suma", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f))
+        }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        rows.forEach { (date, minutes) ->
+            val isToday = date == today
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = date.format(DateTimeFormatter.ofPattern("dd.MM")),
+                    fontSize = 13.sp,
+                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1.4f)
+                )
+                Text(
+                    text = dayNames[date.dayOfWeek.value - 1],
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = if (minutes > 0) vm.formatMinutes(minutes) else "—",
+                    fontSize = 13.sp,
+                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Suma", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(vm.formatMinutes(totalMinutes), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Dni przepracowane", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$workedDays", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Średnio", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(vm.formatMinutes(avgMinutes), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
     }
 }
