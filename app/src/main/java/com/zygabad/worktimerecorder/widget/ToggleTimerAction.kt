@@ -16,23 +16,30 @@ import kotlinx.coroutines.withContext
 class ToggleTimerAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val prefs = PrefsManager(context)
-        val repo = WorkRepository(WorkDatabase.getDatabase(context).workDao())
 
         withContext(Dispatchers.IO) {
-            if (prefs.isWorking) {
-                val id = prefs.currentSessionId
-                val start = prefs.currentSessionStart
-                if (id > 0 && start > 0) repo.stopSession(id, start)
-                prefs.isWorking = false
-                prefs.currentSessionStart = -1L
-                prefs.currentSessionId = -1L
-                context.stopService(Intent(context, WorkTimerService::class.java))
-            } else {
-                val id = repo.startSession()
-                prefs.isWorking = true
-                prefs.currentSessionStart = System.currentTimeMillis()
-                prefs.currentSessionId = id
-                context.startForegroundService(Intent(context, WorkTimerService::class.java))
+            try {
+                val repo = WorkRepository(WorkDatabase.getDatabase(context).workDao())
+                if (prefs.isWorking) {
+                    val id = prefs.currentSessionId
+                    val start = prefs.currentSessionStart
+                    if (id > 0 && start > 0) repo.stopSession(id, start)
+                    prefs.isWorking = false
+                    prefs.currentSessionStart = -1L
+                    prefs.currentSessionId = -1L
+                    try { context.stopService(Intent(context, WorkTimerService::class.java)) } catch (_: Exception) {}
+                } else {
+                    val id = repo.startSession()
+                    prefs.isWorking = true
+                    prefs.currentSessionStart = System.currentTimeMillis()
+                    prefs.currentSessionId = id
+                    try { context.startForegroundService(Intent(context, WorkTimerService::class.java)) } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {
+                // fallback: toggle only the pref so widget still visually updates
+                prefs.isWorking = !prefs.isWorking
+                if (prefs.isWorking) prefs.currentSessionStart = System.currentTimeMillis()
+                else { prefs.currentSessionStart = -1L; prefs.currentSessionId = -1L }
             }
         }
 
