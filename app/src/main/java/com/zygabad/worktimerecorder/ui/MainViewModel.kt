@@ -9,9 +9,11 @@ import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkSession
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -63,35 +65,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleWork() {
         viewModelScope.launch {
-            if (isWorking.value) stopWork() else startWork()
+            withContext(Dispatchers.IO) { repo.toggleWork(prefs) }
+            isWorking.value = prefs.isWorking
+            sessionStartTime.value = prefs.currentSessionStart
+            elapsedSeconds.value = calcElapsed()
+            val app = getApplication<Application>()
+            if (prefs.isWorking) {
+                app.startService(Intent(app, WorkTimerService::class.java))
+            } else {
+                app.stopService(Intent(app, WorkTimerService::class.java))
+            }
         }
-    }
-
-    private suspend fun startWork() {
-        val id = repo.startSession()
-        prefs.isWorking = true
-        prefs.currentSessionStart = System.currentTimeMillis()
-        prefs.currentSessionId = id
-        isWorking.value = true
-        sessionStartTime.value = prefs.currentSessionStart
-        getApplication<Application>().startService(
-            Intent(getApplication(), WorkTimerService::class.java)
-        )
-    }
-
-    private suspend fun stopWork() {
-        val id = prefs.currentSessionId
-        val start = prefs.currentSessionStart
-        if (id > 0 && start > 0) repo.stopSession(id, start)
-        prefs.isWorking = false
-        prefs.currentSessionStart = -1L
-        prefs.currentSessionId = -1L
-        isWorking.value = false
-        sessionStartTime.value = -1L
-        elapsedSeconds.value = 0L
-        getApplication<Application>().stopService(
-            Intent(getApplication(), WorkTimerService::class.java)
-        )
     }
 
     fun previousWeek() { _weekStart.value = _weekStart.value.minusWeeks(1) }
