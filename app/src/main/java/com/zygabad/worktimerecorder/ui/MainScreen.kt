@@ -302,7 +302,7 @@ fun WeeklyBarChart(
                     modifier = Modifier.weight(1f)
                 ) {
                     if (!isFuture && minutes > 0) {
-                        Text(text = "${minutes / 60}h", fontSize = 9.sp,
+                        Text(text = "${minutes / 60}:${(minutes % 60).toString().padStart(2, '0')}", fontSize = 9.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Box(
