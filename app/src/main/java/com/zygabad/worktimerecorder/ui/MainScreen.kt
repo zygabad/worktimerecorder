@@ -1,6 +1,7 @@
 package com.zygabad.worktimerecorder.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -26,6 +27,23 @@ import java.time.format.DateTimeFormatter
 private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
 private fun formatClock(epochMs: Long): String =
     Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(timeFmt)
+
+private data class EditingTime(val session: WorkSession, val isStart: Boolean)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditTimeDialog(initialEpochMs: Long?, onConfirm: (hour: Int, minute: Int) -> Unit, onDismiss: () -> Unit) {
+    val zone = ZoneId.systemDefault()
+    val initial = initialEpochMs?.let { Instant.ofEpochMilli(it).atZone(zone) } ?: java.time.ZonedDateTime.now(zone)
+    val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Wybierz godzinę") },
+        text = { TimePicker(state = state) },
+        confirmButton = { TextButton(onClick = { onConfirm(state.hour, state.minute) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } }
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -283,6 +301,7 @@ fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
     val sorted = sessions.sortedBy { it.startTime }
     val total = sorted.sumOf { vm.sessionMinutes(it) }
     var pendingDelete by remember { mutableStateOf<WorkSession?>(null) }
+    var editingTime by remember { mutableStateOf<EditingTime?>(null) }
 
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -294,8 +313,12 @@ fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         sorted.forEach { session ->
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(formatClock(session.startTime), fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, true) })
+                Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, false) })
                 Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
                 IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(18.dp),
@@ -312,6 +335,16 @@ fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
 
     pendingDelete?.let { session ->
         DeleteSessionDialog(session, onConfirm = { vm.deleteSession(session); pendingDelete = null }, onDismiss = { pendingDelete = null })
+    }
+    editingTime?.let { et ->
+        EditTimeDialog(
+            initialEpochMs = if (et.isStart) et.session.startTime else et.session.endTime,
+            onConfirm = { h, m ->
+                if (et.isStart) vm.updateSessionStart(et.session, h, m) else vm.updateSessionEnd(et.session, h, m)
+                editingTime = null
+            },
+            onDismiss = { editingTime = null }
+        )
     }
 }
 
@@ -341,6 +374,7 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
     val byDate = sessions.groupBy { it.date }
     var weekTotal = 0
     var pendingDelete by remember { mutableStateOf<WorkSession?>(null) }
+    var editingTime by remember { mutableStateOf<EditingTime?>(null) }
 
     Column {
         (0..6).forEach { i ->
@@ -361,8 +395,12 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             Spacer(Modifier.height(4.dp))
             daySessions.forEach { session ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(formatClock(session.startTime), fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, true) })
+                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, false) })
                     Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
                     IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(16.dp),
@@ -384,5 +422,15 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
 
     pendingDelete?.let { session ->
         DeleteSessionDialog(session, onConfirm = { vm.deleteSession(session); pendingDelete = null }, onDismiss = { pendingDelete = null })
+    }
+    editingTime?.let { et ->
+        EditTimeDialog(
+            initialEpochMs = if (et.isStart) et.session.startTime else et.session.endTime,
+            onConfirm = { h, m ->
+                if (et.isStart) vm.updateSessionStart(et.session, h, m) else vm.updateSessionEnd(et.session, h, m)
+                editingTime = null
+            },
+            onDismiss = { editingTime = null }
+        )
     }
 }

@@ -7,12 +7,15 @@ import androidx.core.app.NotificationCompat
 import androidx.glance.appwidget.updateAll
 import com.zygabad.worktimerecorder.MainActivity
 import com.zygabad.worktimerecorder.data.PrefsManager
+import com.zygabad.worktimerecorder.data.WorkDatabase
+import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
 import kotlinx.coroutines.*
 
 class WorkTimerService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val prefs by lazy { PrefsManager(this) }
+    private val repo by lazy { WorkRepository(WorkDatabase.getDatabase(this).workDao()) }
 
     override fun onCreate() {
         super.onCreate()
@@ -24,6 +27,16 @@ class WorkTimerService : Service() {
         scope.launch {
             while (isActive) {
                 delay(60_000)
+
+                if (repo.autoStopIfStale(prefs)) {
+                    WorkTimerGlanceWidget().updateAll(this@WorkTimerService)
+                    (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                        .notify(NOTIF_ID, buildNotification("Zatrzymano automatycznie po 20h — zapomniałeś wyłączyć?"))
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                    stopSelf()
+                    return@launch
+                }
+
                 val start = prefs.currentSessionStart
                 val target = prefs.targetWorkMinutes
                 val elapsed = if (start > 0) ((System.currentTimeMillis() - start) / 60_000).toInt() else 0

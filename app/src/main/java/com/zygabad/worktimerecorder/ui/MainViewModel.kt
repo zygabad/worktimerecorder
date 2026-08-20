@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -96,6 +97,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
                 WorkTimerGlanceWidget().updateAll(app)
             }
+        }
+    }
+
+    private fun combineDateTime(dateStr: String, hour: Int, minute: Int): Long =
+        LocalDate.parse(dateStr, fmt).atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    fun updateSessionStart(session: WorkSession, hour: Int, minute: Int) {
+        viewModelScope.launch {
+            val newStart = combineDateTime(session.date, hour, minute)
+            withContext(Dispatchers.IO) { repo.updateSessionTimes(session, newStart, session.endTime) }
+            if (session.id.toLong() == prefs.currentSessionId) {
+                prefs.currentSessionStart = newStart
+                sessionStartTime.value = newStart
+                elapsedSeconds.value = calcElapsed()
+            }
+            WorkTimerGlanceWidget().updateAll(getApplication<Application>())
+        }
+    }
+
+    fun updateSessionEnd(session: WorkSession, hour: Int, minute: Int) {
+        viewModelScope.launch {
+            val newEnd = combineDateTime(session.date, hour, minute)
+            withContext(Dispatchers.IO) { repo.updateSessionTimes(session, session.startTime, newEnd) }
+            if (session.endTime == null && session.id.toLong() == prefs.currentSessionId) {
+                // Giving an open session an end time closes it — stop tracking/counting it.
+                prefs.isWorking = false
+                prefs.currentSessionStart = -1L
+                prefs.currentSessionId = -1L
+                isWorking.value = false
+                sessionStartTime.value = -1L
+                elapsedSeconds.value = 0L
+                val app = getApplication<Application>()
+                app.stopService(Intent(app, WorkTimerService::class.java))
+            }
+            WorkTimerGlanceWidget().updateAll(getApplication<Application>())
         }
     }
 

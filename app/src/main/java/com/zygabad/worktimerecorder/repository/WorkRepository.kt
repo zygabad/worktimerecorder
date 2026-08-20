@@ -7,7 +7,8 @@ import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-private const val MAX_SESSION_MINUTES = 16 * 60 // a single work session longer than this is corrupted data, not real work
+const val AUTO_STOP_MINUTES = 20 * 60 // safety net: a session left running this long auto-closes, e.g. forgot to tap stop
+private const val MAX_SESSION_MINUTES = AUTO_STOP_MINUTES + 60 // longer than that (with margin) is corrupted data, not real work
 
 class WorkRepository(private val dao: WorkDao) {
     private val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -50,6 +51,30 @@ class WorkRepository(private val dao: WorkDao) {
 
     suspend fun deleteSession(session: WorkSession) = dao.delete(session)
 
+    suspend fun updateSessionTimes(session: WorkSession, newStart: Long, newEnd: Long?) {
+        val duration = newEnd?.let { ((it - newStart) / 60_000).toInt().coerceAtLeast(0) } ?: 0
+        dao.update(session.copy(startTime = newStart, endTime = newEnd, durationMinutes = duration))
+    }
+
+    /**
+     * Safety net for forgetting to stop the timer: a session left open this long closes itself
+     * at the AUTO_STOP_MINUTES mark. Returns true if it closed something.
+     */
+    suspend fun autoStopIfStale(prefs: PrefsManager): Boolean {
+        val open = dao.getOpenSession() ?: return false
+        val elapsed = ((System.currentTimeMillis() - open.startTime) / 60_000).toInt()
+        if (elapsed < AUTO_STOP_MINUTES) return false
+
+        val end = open.startTime + AUTO_STOP_MINUTES * 60_000L
+        dao.update(open.copy(endTime = end, durationMinutes = AUTO_STOP_MINUTES))
+        if (prefs.isWorking) {
+            prefs.isWorking = false
+            prefs.currentSessionStart = -1L
+            prefs.currentSessionId = -1L
+        }
+        return true
+    }
+
     /**
      * One-time self-heal for sessions left behind by earlier bugs: multiple simultaneously
      * "open" (endTime == null) rows each counted live elapsed time and got summed, producing
@@ -57,6 +82,8 @@ class WorkRepository(private val dao: WorkDao) {
      * so it's discarded rather than guessed at.
      */
     suspend fun cleanupCorruptedSessions(prefs: PrefsManager) {
+        autoStopIfStale(prefs)
+
         val legitOpenId = if (prefs.isWorking) prefs.currentSessionId else -1L
 
         dao.getOpenSessions().forEach { session ->
