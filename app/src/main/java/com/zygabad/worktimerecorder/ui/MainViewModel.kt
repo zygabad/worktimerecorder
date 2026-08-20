@@ -93,10 +93,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun getDayMinutes(date: String, sessions: List<WorkSession>): Int =
-        sessions.filter { it.date == date }.sumOf {
-            it.durationMinutes.takeIf { d -> d > 0 }
-                ?: (((it.endTime ?: System.currentTimeMillis()) - it.startTime) / 60_000).toInt()
-        }
+        sessions.filter { it.date == date }.sumOf { sessionMinutes(it) }
+
+    fun sessionMinutes(session: WorkSession): Int =
+        session.durationMinutes.takeIf { it > 0 }
+            ?: (((session.endTime ?: System.currentTimeMillis()) - session.startTime) / 60_000).toInt()
 
     fun formatMinutes(min: Int): String {
         val h = min / 60; val m = min % 60

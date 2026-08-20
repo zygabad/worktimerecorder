@@ -18,8 +18,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.zygabad.worktimerecorder.data.WorkSession
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
+private fun formatClock(epochMs: Long): String =
+    Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(timeFmt)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,6 +144,12 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                     style = MaterialTheme.typography.titleLarge)
                             }
                         }
+                        if (todaySessions.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(12.dp))
+                            SessionsTable(todaySessions, vm)
+                        }
                     }
                 }
             }
@@ -163,7 +175,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             }
                         }
                         Spacer(Modifier.height(12.dp))
-                        WeeklyBarChart(weekStart, weekSessions, targetMinutes, vm)
+                        WeekSessionsTable(weekStart, weekSessions, vm)
                     }
                 }
             }
@@ -267,74 +279,74 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
 }
 
 @Composable
-fun WeeklyBarChart(
-    weekStart: LocalDate,
-    sessions: List<WorkSession>,
-    targetMinutes: Int,
-    vm: MainViewModel
-) {
-    val dayNames = listOf("Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd")
-    val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now()
-    val weekTotal = (0..6).sumOf { vm.getDayMinutes(weekStart.plusDays(it.toLong()).format(fmt), sessions) }
+fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
+    val sorted = sessions.sortedBy { it.startTime }
+    val total = sorted.sumOf { vm.sessionMinutes(it) }
 
     Column {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.Bottom
-        ) {
-            (0..6).forEach { i ->
-                val date = weekStart.plusDays(i.toLong())
-                val dateStr = date.format(fmt)
-                val minutes = vm.getDayMinutes(dateStr, sessions)
-                val ratio = (minutes.toFloat() / targetMinutes).coerceIn(0f, 1f)
-                val isToday = date == today
-                val isFuture = date.isAfter(today)
-                val barColor = when {
-                    isFuture -> MaterialTheme.colorScheme.surfaceVariant
-                    minutes >= targetMinutes -> MaterialTheme.colorScheme.primary
-                    minutes > 0 -> MaterialTheme.colorScheme.primaryContainer
-                    else -> MaterialTheme.colorScheme.surfaceVariant
-                }
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (!isFuture && minutes > 0) {
-                        Text(text = "${minutes / 60}:${(minutes % 60).toString().padStart(2, '0')}", fontSize = 9.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Box(
-                        Modifier.height(80.dp).fillMaxWidth().padding(horizontal = 2.dp),
-                        contentAlignment = Alignment.BottomCenter
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(if (isFuture) 0.04f else ratio.coerceAtLeast(0.03f))
-                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                .background(barColor)
-                        )
-                    }
-                    Text(
-                        text = dayNames[i],
-                        fontSize = 11.sp,
-                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isToday) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface
-                    )
-                }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Pocz.", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Koniec", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("Suma", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        }
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        sorted.forEach { session ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
             }
         }
-        Spacer(Modifier.height(12.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Tydzień łącznie", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(vm.formatMinutes(weekTotal), style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold)
+            Text("Suma", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(vm.formatMinutes(total), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: MainViewModel) {
+    val dayNames = listOf("Pon", "Wto", "Śro", "Czw", "Pią", "Sob", "Nie")
+    val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val dateFmt = DateTimeFormatter.ofPattern("dd.MM")
+    val today = LocalDate.now()
+    val byDate = sessions.groupBy { it.date }
+    var weekTotal = 0
+
+    Column {
+        (0..6).forEach { i ->
+            val date = weekStart.plusDays(i.toLong())
+            if (date.isAfter(today)) return@forEach
+            val daySessions = byDate[date.format(fmt)]?.sortedBy { it.startTime } ?: emptyList()
+            if (daySessions.isEmpty()) return@forEach
+
+            val dayTotal = daySessions.sumOf { vm.sessionMinutes(it) }
+            weekTotal += dayTotal
+
+            Text(
+                text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(4.dp))
+            daySessions.forEach { session ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp)) {
+                Spacer(Modifier.weight(2f))
+                Text(vm.formatMinutes(dayTotal), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            }
+            HorizontalDivider(Modifier.padding(bottom = 8.dp))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Suma", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(vm.formatMinutes(weekTotal), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
     }
 }
