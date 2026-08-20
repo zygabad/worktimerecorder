@@ -48,6 +48,8 @@ class WorkRepository(private val dao: WorkDao) {
         }
     }
 
+    suspend fun deleteSession(session: WorkSession) = dao.delete(session)
+
     /**
      * One-time self-heal for sessions left behind by earlier bugs: multiple simultaneously
      * "open" (endTime == null) rows each counted live elapsed time and got summed, producing

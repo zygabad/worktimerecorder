@@ -9,6 +9,8 @@ import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkSession
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
+import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -74,6 +76,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.startService(Intent(app, WorkTimerService::class.java))
             } else {
                 app.stopService(Intent(app, WorkTimerService::class.java))
+            }
+            WorkTimerGlanceWidget().updateAll(app)
+        }
+    }
+
+    fun deleteSession(session: WorkSession) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repo.deleteSession(session) }
+            if (session.id.toLong() == prefs.currentSessionId) {
+                // The row backing the currently-tracked session is gone — stop tracking it too.
+                prefs.isWorking = false
+                prefs.currentSessionStart = -1L
+                prefs.currentSessionId = -1L
+                isWorking.value = false
+                sessionStartTime.value = -1L
+                elapsedSeconds.value = 0L
+                val app = getApplication<Application>()
+                app.stopService(Intent(app, WorkTimerService::class.java))
+                WorkTimerGlanceWidget().updateAll(app)
             }
         }
     }

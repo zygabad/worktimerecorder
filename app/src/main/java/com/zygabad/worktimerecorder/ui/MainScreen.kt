@@ -282,19 +282,25 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
 fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
     val sorted = sessions.sortedBy { it.startTime }
     val total = sorted.sumOf { vm.sessionMinutes(it) }
+    var pendingDelete by remember { mutableStateOf<WorkSession?>(null) }
 
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Pocz.", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Koniec", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("Suma", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(40.dp))
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         sorted.forEach { session ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -303,6 +309,27 @@ fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
             Text(vm.formatMinutes(total), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
     }
+
+    pendingDelete?.let { session ->
+        DeleteSessionDialog(session, onConfirm = { vm.deleteSession(session); pendingDelete = null }, onDismiss = { pendingDelete = null })
+    }
+}
+
+@Composable
+fun DeleteSessionDialog(session: WorkSession, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Usunąć wpis?") },
+        text = {
+            Text("${formatClock(session.startTime)} – ${session.endTime?.let { formatClock(it) } ?: "trwa"}")
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Usuń") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
 }
 
 @Composable
@@ -313,6 +340,7 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
     val today = LocalDate.now()
     val byDate = sessions.groupBy { it.date }
     var weekTotal = 0
+    var pendingDelete by remember { mutableStateOf<WorkSession?>(null) }
 
     Column {
         (0..6).forEach { i ->
@@ -332,10 +360,14 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             )
             Spacer(Modifier.height(4.dp))
             daySessions.forEach { session ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(formatClock(session.startTime), fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp)) {
@@ -348,5 +380,9 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             Text("Suma", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(vm.formatMinutes(weekTotal), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
+    }
+
+    pendingDelete?.let { session ->
+        DeleteSessionDialog(session, onConfirm = { vm.deleteSession(session); pendingDelete = null }, onDismiss = { pendingDelete = null })
     }
 }
