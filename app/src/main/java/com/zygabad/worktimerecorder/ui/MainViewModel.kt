@@ -85,7 +85,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteSession(session: WorkSession) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repo.deleteSession(session) }
-            if (session.id.toLong() == prefs.currentSessionId) {
+            if (session.endTime == null) {
                 // The row backing the currently-tracked session is gone — stop tracking it too.
                 prefs.isWorking = false
                 prefs.currentSessionStart = -1L
@@ -107,8 +107,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val newStart = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, newStart, session.endTime) }
-            if (session.id.toLong() == prefs.currentSessionId) {
+            if (session.endTime == null) {
+                // There is only ever one open session — this IS the live one regardless of
+                // whether prefs.currentSessionId already agreed, so resync unconditionally.
+                // Previously this only updated the on-screen elapsed counter when the id
+                // already matched prefs; any mismatch left the counter frozen at the old value.
+                prefs.isWorking = true
+                prefs.currentSessionId = session.id.toLong()
                 prefs.currentSessionStart = newStart
+                isWorking.value = true
                 sessionStartTime.value = newStart
                 elapsedSeconds.value = calcElapsed()
             }
@@ -120,8 +127,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val newEnd = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, session.startTime, newEnd) }
-            if (session.endTime == null && session.id.toLong() == prefs.currentSessionId) {
-                // Giving an open session an end time closes it — stop tracking/counting it.
+            if (session.endTime == null) {
+                // Giving the (only) open session an end time closes it — stop tracking/counting it.
                 prefs.isWorking = false
                 prefs.currentSessionStart = -1L
                 prefs.currentSessionId = -1L

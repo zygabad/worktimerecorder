@@ -10,10 +10,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -173,6 +175,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
             }
 
             item {
+                var expanded by rememberSaveable { mutableStateOf(false) }
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -186,19 +189,27 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             Text(
                                 text = vm.getWeekLabel(weekStart),
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f).clickable { expanded = !expanded },
+                                textAlign = TextAlign.Center
                             )
                             IconButton(onClick = { vm.nextWeek() }) {
                                 Icon(Icons.Default.ChevronRight, "Następny tydzień")
                             }
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Rozwiń/zwiń")
+                            }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        WeekSessionsTable(weekStart, weekSessions, vm)
+                        if (expanded) {
+                            Spacer(Modifier.height(8.dp))
+                            WeekSessionsTable(weekStart, weekSessions, vm)
+                        }
                     }
                 }
             }
 
             item {
+                var expanded by rememberSaveable { mutableStateOf(false) }
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
@@ -212,14 +223,21 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             Text(
                                 text = vm.getMonthLabel(monthStart).replaceFirstChar { it.uppercase() },
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f).clickable { expanded = !expanded },
+                                textAlign = TextAlign.Center
                             )
                             IconButton(onClick = { vm.nextMonth() }) {
                                 Icon(Icons.Default.ChevronRight, "Następny miesiąc")
                             }
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Rozwiń/zwiń")
+                            }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        MonthlyTable(monthStart, monthSessions, vm)
+                        if (expanded) {
+                            Spacer(Modifier.height(8.dp))
+                            MonthlyTable(monthStart, monthSessions, vm)
+                        }
                     }
                 }
             }
@@ -386,34 +404,32 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             val dayTotal = daySessions.sumOf { vm.sessionMinutes(it) }
             weekTotal += dayTotal
 
-            Text(
-                text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+                Text(vm.formatMinutes(dayTotal), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
             daySessions.forEach { session ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatClock(session.startTime), fontSize = 13.sp,
+                Row(Modifier.fillMaxWidth().padding(vertical = 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(formatClock(session.startTime), fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, true) })
-                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp,
+                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, false) })
-                    Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(16.dp),
+                    Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp)) {
-                Spacer(Modifier.weight(2f))
-                Text(vm.formatMinutes(dayTotal), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            }
-            HorizontalDivider(Modifier.padding(bottom = 8.dp))
         }
+        HorizontalDivider(Modifier.padding(top = 6.dp, bottom = 6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Suma", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(vm.formatMinutes(weekTotal), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
