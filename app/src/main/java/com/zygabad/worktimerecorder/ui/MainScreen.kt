@@ -117,6 +117,24 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                 progress = { (todayMinutes.toFloat() / targetMinutes).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
                             )
+                            Spacer(Modifier.height(12.dp))
+                            val nowMs = System.currentTimeMillis()
+                            fun finishClock(targetMin: Int): String =
+                                formatClock(nowMs + (targetMin - todayMinutes).coerceAtLeast(0) * 60_000L)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Koniec (8h)", style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(finishClock(480), style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = if (targetMinutes == 480) FontWeight.Bold else FontWeight.Normal)
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Koniec (8h30m)", style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(finishClock(510), style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = if (targetMinutes == 510) FontWeight.Bold else FontWeight.Normal)
+                                }
+                            }
                         }
                         Spacer(Modifier.height(20.dp))
                         Button(

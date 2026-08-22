@@ -17,10 +17,11 @@ import androidx.navigation.NavController
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()) {
-    val currentTarget = vm.prefs.targetWorkMinutes
-    var hours by remember { mutableStateOf((currentTarget / 60).toString()) }
-    var minutes by remember { mutableStateOf((currentTarget % 60).toString()) }
+    val initialTarget = vm.prefs.targetWorkMinutes
+    var hours by remember { mutableStateOf((initialTarget / 60).toString()) }
+    var minutes by remember { mutableStateOf((initialTarget % 60).toString()) }
     var saved by remember { mutableStateOf(false) }
+    val currentTarget = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
 
     Scaffold(
         topBar = {
@@ -46,6 +47,23 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             Text(
                 "Ustaw ile godzin i minut traktujesz jako pełny dzień pracy. Domyślnie 8h 30min.",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = currentTarget == 480,
+                    onClick = { hours = "8"; minutes = "0"; vm.prefs.targetWorkMinutes = 480; saved = true },
+                    label = { Text("8h") }
+                )
+                FilterChip(
+                    selected = currentTarget == 510,
+                    onClick = { hours = "8"; minutes = "30"; vm.prefs.targetWorkMinutes = 510; saved = true },
+                    label = { Text("8h 30m") }
+                )
+            }
+            Text(
+                "albo wpisz własną wartość:",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
