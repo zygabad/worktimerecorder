@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -142,6 +143,21 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                     onCheckedChange = { requireDoubleTap = it; vm.prefs.requireDoubleTap = it }
                 )
             }
+
+            HorizontalDivider()
+            val context = LocalContext.current
+            val versionLabel = remember {
+                runCatching {
+                    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val code = androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
+                    "${info.versionName} (build $code)"
+                }.getOrDefault("—")
+            }
+            Text(
+                "Wersja aplikacji: $versionLabel",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
