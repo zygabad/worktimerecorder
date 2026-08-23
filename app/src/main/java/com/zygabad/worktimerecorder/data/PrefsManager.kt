@@ -22,4 +22,12 @@ class PrefsManager(context: Context) {
     var currentSessionId: Long
         get() = prefs.getLong("session_id", -1L)
         set(value) = prefs.edit { putLong("session_id", value) }
+
+    var requireDoubleTap: Boolean
+        get() = prefs.getBoolean("require_double_tap", false)
+        set(value) = prefs.edit { putBoolean("require_double_tap", value) }
+
+    var lastWidgetTapTime: Long
+        get() = prefs.getLong("last_widget_tap_time", -1L)
+        set(value) = prefs.edit { putLong("last_widget_tap_time", value) }
 }
