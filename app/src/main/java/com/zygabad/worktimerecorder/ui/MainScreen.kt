@@ -14,8 +14,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -59,7 +61,9 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val monthStart by vm.monthStart.collectAsState()
     val todayMinutes = vm.getTodayTotalMinutes(todaySessions)
     val targetMinutes = vm.prefs.targetWorkMinutes
+    val isOvertime = todayMinutes > targetMinutes
     val remainingMinutes = (targetMinutes - todayMinutes).coerceAtLeast(0)
+    val overtimeMinutes = (todayMinutes - targetMinutes).coerceAtLeast(0)
 
     Scaffold(
         topBar = {
@@ -103,19 +107,25 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         Text(
                             text = if (isWorking) vm.formatSeconds(elapsed) else "00:00",
                             style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
                         )
                         if (isWorking) {
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                text = "Pozostało: ${vm.formatMinutes(remainingMinutes)}",
+                                text = if (isOvertime) "Nadgodziny: +${vm.formatMinutes(overtimeMinutes)}"
+                                       else "Pozostało: ${vm.formatMinutes(remainingMinutes)}",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (isOvertime) MaterialTheme.colorScheme.tertiary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (isOvertime) FontWeight.Bold else FontWeight.Normal
                             )
                             Spacer(Modifier.height(8.dp))
                             LinearProgressIndicator(
                                 progress = { (todayMinutes.toFloat() / targetMinutes).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = if (isOvertime) MaterialTheme.colorScheme.tertiary
+                                        else ProgressIndicatorDefaults.linearColor
                             )
                             Spacer(Modifier.height(12.dp))
                             val nowMs = System.currentTimeMillis()
@@ -126,13 +136,15 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                     Text("Koniec (8h)", style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(finishClock(480), style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = if (targetMinutes == 480) FontWeight.Bold else FontWeight.Normal)
+                                        fontWeight = if (targetMinutes == 480) FontWeight.Bold else FontWeight.Normal,
+                                        fontFamily = FontFamily.Monospace)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("Koniec (8h30m)", style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(finishClock(510), style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = if (targetMinutes == 510) FontWeight.Bold else FontWeight.Normal)
+                                        fontWeight = if (targetMinutes == 510) FontWeight.Bold else FontWeight.Normal,
+                                        fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
@@ -298,6 +310,7 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
                 Text(
                     text = date.format(DateTimeFormatter.ofPattern("dd.MM")),
                     fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
                     fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                     color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1.4f)
@@ -311,6 +324,7 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
                 Text(
                     text = if (minutes > 0) vm.formatMinutes(minutes) else "—",
                     fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
                     fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.weight(1f)
                 )
@@ -349,13 +363,15 @@ fun SessionsTable(sessions: List<WorkSession>, vm: MainViewModel) {
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         sorted.forEach { session ->
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(formatClock(session.startTime), fontSize = 13.sp,
+                Text(formatClock(session.startTime), fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+                    textDecoration = TextDecoration.Underline,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, true) })
-                Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp,
+                Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+                    textDecoration = TextDecoration.Underline,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, false) })
-                Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 13.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
                 IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -433,15 +449,18 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             }
             daySessions.forEach { session ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatClock(session.startTime), fontSize = 12.sp,
+                    Text(formatClock(session.startTime), fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                        textDecoration = TextDecoration.Underline,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, true) })
-                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 12.sp,
+                    Text(session.endTime?.let { formatClock(it) } ?: "…", fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                        textDecoration = TextDecoration.Underline,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f).clickable { editingTime = EditingTime(session, false) })
-                    Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(14.dp),
+                    Text(vm.formatMinutes(vm.sessionMinutes(session)), fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = { pendingDelete = session }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Usuń", modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

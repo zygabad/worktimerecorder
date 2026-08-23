@@ -10,6 +10,7 @@ import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.provideContent
 import androidx.glance.layout.*
+import androidx.glance.text.FontFamily
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
@@ -43,17 +44,18 @@ private fun WidgetContent(prefs: PrefsManager) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (isWorking) {
+                val isOvertime = remainingMs <= 0
                 Text(
-                    text = if (remainingMs > 0) formatRemaining(remainingMs) else "DONE!",
+                    text = if (isOvertime) "+${formatRemaining(-remainingMs)}" else formatRemaining(remainingMs),
                     style = TextStyle(
-                        color = if (remainingMs > 0) ColorProvider(Color.White)
-                        else ColorProvider(Color(0xFF66BB6A)),
+                        color = if (isOvertime) ColorProvider(Color(0xFFFFB74D)) else ColorProvider(Color.White),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
                 )
                 Text(
-                    text = "do końca",
+                    text = if (isOvertime) "nadgodziny" else "do końca",
                     style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
                 )
             } else {
