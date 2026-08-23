@@ -28,6 +28,11 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
         topBar = {
             TopAppBar(
                 title = { Text("Ustawienia") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, "Wróć")

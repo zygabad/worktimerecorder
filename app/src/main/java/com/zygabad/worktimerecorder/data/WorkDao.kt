@@ -8,6 +8,9 @@ interface WorkDao {
     @Query("SELECT * FROM work_sessions WHERE date = :date ORDER BY startTime")
     fun getSessionsForDate(date: String): Flow<List<WorkSession>>
 
+    @Query("SELECT * FROM work_sessions WHERE date = :date ORDER BY startTime")
+    suspend fun getSessionsForDateOnce(date: String): List<WorkSession>
+
     @Query("SELECT * FROM work_sessions WHERE date >= :fromDate AND date <= :toDate ORDER BY date, startTime")
     fun getSessionsForWeek(fromDate: String, toDate: String): Flow<List<WorkSession>>
 

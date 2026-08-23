@@ -1,5 +1,6 @@
 package com.zygabad.worktimerecorder.ui
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -69,6 +72,11 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
         topBar = {
             TopAppBar(
                 title = { Text("Work Timer", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
                 actions = {
                     IconButton(onClick = { navController.navigate("settings") }) {
                         Icon(Icons.Default.Settings, contentDescription = "Ustawienia")
@@ -260,6 +268,18 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             IconButton(onClick = { vm.nextMonth() }) {
                                 Icon(Icons.Default.ChevronRight, "Następny miesiąc")
                             }
+                            val context = LocalContext.current
+                            IconButton(onClick = {
+                                val csv = buildMonthCsv(monthStart, monthSessions, vm)
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/csv"
+                                    putExtra(Intent.EXTRA_SUBJECT, "WorkTimeRecorder ${vm.getMonthLabel(monthStart)}")
+                                    putExtra(Intent.EXTRA_TEXT, csv)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Udostępnij dane miesiąca"))
+                            }) {
+                                Icon(Icons.Default.Share, "Eksportuj CSV")
+                            }
                             IconButton(onClick = { expanded = !expanded }) {
                                 Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Rozwiń/zwiń")
                             }
@@ -273,6 +293,19 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
             }
         }
     }
+}
+
+private fun buildMonthCsv(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainViewModel): String {
+    val sb = StringBuilder()
+    sb.appendLine("Data,Poczatek,Koniec,Suma (min)")
+    sessions.sortedWith(compareBy({ it.date }, { it.startTime })).forEach { s ->
+        val start = formatClock(s.startTime)
+        val end = s.endTime?.let { formatClock(it) } ?: ""
+        sb.appendLine("${s.date},${start},${end},${vm.sessionMinutes(s)}")
+    }
+    val total = sessions.sumOf { vm.sessionMinutes(it) }
+    sb.appendLine("Suma,,,${total}")
+    return sb.toString()
 }
 
 @Composable
@@ -301,10 +334,12 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
                 modifier = Modifier.weight(1f))
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
-        rows.forEach { (date, minutes) ->
+        rows.forEachIndexed { index, (date, minutes) ->
             val isToday = date == today
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                Modifier.fillMaxWidth()
+                    .background(if (index % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.Transparent)
+                    .padding(vertical = 3.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -429,6 +464,7 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
     var editingTime by remember { mutableStateOf<EditingTime?>(null) }
 
     Column {
+        var renderedDayIndex = 0
         (0..6).forEach { i ->
             val date = weekStart.plusDays(i.toLong())
             if (date.isAfter(today)) return@forEach
@@ -437,8 +473,10 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
 
             val dayTotal = daySessions.sumOf { vm.sessionMinutes(it) }
             weekTotal += dayTotal
+            val stripe = if (renderedDayIndex % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.Transparent
+            renderedDayIndex++
 
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth().background(stripe).padding(top = 4.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
                     fontSize = 12.sp,
@@ -448,7 +486,7 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
                 Text(vm.formatMinutes(dayTotal), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             daySessions.forEach { session ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().background(stripe).padding(vertical = 0.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(formatClock(session.startTime), fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                         textDecoration = TextDecoration.Underline,
                         color = MaterialTheme.colorScheme.primary,
