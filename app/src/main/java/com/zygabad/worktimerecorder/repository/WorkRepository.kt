@@ -23,6 +23,16 @@ class WorkRepository(private val dao: WorkDao) {
         dao.getSessionsForWeek(monthStart.format(fmt), monthStart.plusMonths(1).minusDays(1).format(fmt))
 
     /**
+     * Live view of whichever session is currently open, straight from Room. Anything that reads
+     * this (rather than a ViewModel-cached copy of prefs.isWorking) can't go stale when the
+     * widget's ToggleTimerAction changes the DB from outside the app's own process lifecycle —
+     * the widget and an already-running MainViewModel used to disagree about whether work was
+     * in progress because the ViewModel only ever synced its isWorking/sessionStartTime state
+     * inside its own toggle/edit methods, never in response to an external DB change.
+     */
+    fun observeOpenSession(): Flow<WorkSession?> = dao.observeOpenSession()
+
+    /**
      * Single source of truth for starting/stopping work: always checks the DB for an
      * already-open session instead of trusting SharedPreferences, so the widget action
      * and the in-app button can never diverge into two simultaneously "open" sessions.

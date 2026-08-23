@@ -17,6 +17,9 @@ interface WorkDao {
     @Query("SELECT * FROM work_sessions WHERE endTime IS NULL LIMIT 1")
     suspend fun getOpenSession(): WorkSession?
 
+    @Query("SELECT * FROM work_sessions WHERE endTime IS NULL LIMIT 1")
+    fun observeOpenSession(): Flow<WorkSession?>
+
     @Query("SELECT * FROM work_sessions WHERE endTime IS NULL")
     suspend fun getOpenSessions(): List<WorkSession>
 

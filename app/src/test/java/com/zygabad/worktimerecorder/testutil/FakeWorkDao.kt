@@ -18,6 +18,9 @@ class FakeWorkDao : WorkDao {
     override fun getSessionsForDate(date: String): Flow<List<WorkSession>> =
         flowOf(sessions.filter { it.date == date }.sortedBy { it.startTime })
 
+    override suspend fun getSessionsForDateOnce(date: String): List<WorkSession> =
+        sessions.filter { it.date == date }.sortedBy { it.startTime }
+
     override fun getSessionsForWeek(fromDate: String, toDate: String): Flow<List<WorkSession>> =
         flowOf(
             sessions.filter { it.date >= fromDate && it.date <= toDate }
@@ -25,6 +28,8 @@ class FakeWorkDao : WorkDao {
         )
 
     override suspend fun getOpenSession(): WorkSession? = sessions.firstOrNull { it.endTime == null }
+
+    override fun observeOpenSession(): Flow<WorkSession?> = flowOf(sessions.firstOrNull { it.endTime == null })
 
     override suspend fun getOpenSessions(): List<WorkSession> = sessions.filter { it.endTime == null }
 

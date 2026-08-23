@@ -14,6 +14,13 @@ import androidx.glance.appwidget.updateAll
 import com.zygabad.worktimerecorder.util.combineDateTime
 import com.zygabad.worktimerecorder.util.computeNextMonthStart
 import com.zygabad.worktimerecorder.util.computeNextWeekStart
+import com.zygabad.worktimerecorder.util.formatMinutes
+import com.zygabad.worktimerecorder.util.formatSeconds
+import com.zygabad.worktimerecorder.util.getDayMinutes
+import com.zygabad.worktimerecorder.util.getMonthLabel
+import com.zygabad.worktimerecorder.util.getTodayTotalMinutes
+import com.zygabad.worktimerecorder.util.getWeekLabel
+import com.zygabad.worktimerecorder.util.sessionMinutes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -28,8 +35,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = WorkRepository(db.workDao())
     val prefs = PrefsManager(app)
 
-    val isWorking = MutableStateFlow(prefs.isWorking)
-    val sessionStartTime = MutableStateFlow(prefs.currentSessionStart)
+    /**
+     * Source of truth for "is work in progress", read live from Room instead of cached in a
+     * ViewModel-owned StateFlow. The old design (isWorking/sessionStartTime as MutableStateFlow,
+     * set once at construction and only updated inside this ViewModel's own toggle/edit methods)
+     * went stale whenever the widget's ToggleTimerAction changed prefs+DB from outside — e.g.
+     * background the app, toggle from the widget, reopen the app: the same MainViewModel
+     * instance was still alive with its old cached isWorking=false, showing a frozen "0:00"
+     * even though the session table (already backed by a live Flow) correctly showed a new
+     * running session. Deriving from the DB directly means there is nothing to go out of sync.
+     */
+    val openSession: StateFlow<WorkSession?> = repo.observeOpenSession()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val isWorking: StateFlow<Boolean> = openSession
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), prefs.isWorking)
+
     val elapsedSeconds = MutableStateFlow(calcElapsed())
 
     private val _weekStart = MutableStateFlow(
@@ -54,23 +76,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             while (true) {
-                if (isWorking.value) elapsedSeconds.value = calcElapsed()
+                elapsedSeconds.value = calcElapsed()
                 delay(1_000)
             }
         }
     }
 
     private fun calcElapsed(): Long {
-        val start = prefs.currentSessionStart
-        return if (prefs.isWorking && start > 0) (System.currentTimeMillis() - start) / 1_000 else 0L
+        val start = openSession.value?.startTime
+        return if (start != null) (System.currentTimeMillis() - start) / 1_000 else 0L
     }
 
     fun toggleWork() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repo.toggleWork(prefs) }
-            isWorking.value = prefs.isWorking
-            sessionStartTime.value = prefs.currentSessionStart
-            elapsedSeconds.value = calcElapsed()
             val app = getApplication<Application>()
             if (prefs.isWorking) {
                 app.startService(Intent(app, WorkTimerService::class.java))
@@ -85,13 +104,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repo.deleteSession(session) }
             if (session.endTime == null) {
-                // The row backing the currently-tracked session is gone — stop tracking it too.
-                prefs.isWorking = false
-                prefs.currentSessionStart = -1L
-                prefs.currentSessionId = -1L
-                isWorking.value = false
-                sessionStartTime.value = -1L
-                elapsedSeconds.value = 0L
                 val app = getApplication<Application>()
                 app.stopService(Intent(app, WorkTimerService::class.java))
                 WorkTimerGlanceWidget().updateAll(app)
@@ -103,18 +115,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val newStart = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, newStart, session.endTime) }
-            if (session.endTime == null) {
-                // There is only ever one open session — this IS the live one regardless of
-                // whether prefs.currentSessionId already agreed, so resync unconditionally.
-                // Previously this only updated the on-screen elapsed counter when the id
-                // already matched prefs; any mismatch left the counter frozen at the old value.
-                prefs.isWorking = true
-                prefs.currentSessionId = session.id.toLong()
-                prefs.currentSessionStart = newStart
-                isWorking.value = true
-                sessionStartTime.value = newStart
-                elapsedSeconds.value = calcElapsed()
-            }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
         }
     }
@@ -124,13 +124,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val newEnd = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, session.startTime, newEnd) }
             if (session.endTime == null) {
-                // Giving the (only) open session an end time closes it — stop tracking/counting it.
-                prefs.isWorking = false
-                prefs.currentSessionStart = -1L
-                prefs.currentSessionId = -1L
-                isWorking.value = false
-                sessionStartTime.value = -1L
-                elapsedSeconds.value = 0L
                 val app = getApplication<Application>()
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
@@ -146,7 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         com.zygabad.worktimerecorder.util.getTodayTotalMinutes(sessions, isWorking.value, elapsedSeconds.value)
 
     fun getDayMinutes(date: String, sessions: List<WorkSession>): Int =
-        com.zygabad.worktimerecorder.util.getDayMinutes(date, sessions)
+        com.zygabad.worktimerecorder.util.getDayMinutes(date, sessions, System.currentTimeMillis())
 
     fun sessionMinutes(session: WorkSession): Int =
         com.zygabad.worktimerecorder.util.sessionMinutes(session, System.currentTimeMillis())
