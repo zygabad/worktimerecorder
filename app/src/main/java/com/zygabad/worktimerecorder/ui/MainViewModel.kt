@@ -11,6 +11,9 @@ import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
 import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
 import androidx.glance.appwidget.updateAll
+import com.zygabad.worktimerecorder.util.combineDateTime
+import com.zygabad.worktimerecorder.util.computeNextMonthStart
+import com.zygabad.worktimerecorder.util.computeNextWeekStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -18,16 +21,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as WorkTimerApplication).database
     private val repo = WorkRepository(db.workDao())
     val prefs = PrefsManager(app)
-    private val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     val isWorking = MutableStateFlow(prefs.isWorking)
     val sessionStartTime = MutableStateFlow(prefs.currentSessionStart)
@@ -100,9 +99,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun combineDateTime(dateStr: String, hour: Int, minute: Int): Long =
-        LocalDate.parse(dateStr, fmt).atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
     fun updateSessionStart(session: WorkSession, hour: Int, minute: Int) {
         viewModelScope.launch {
             val newStart = combineDateTime(session.date, hour, minute)
@@ -144,52 +140,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun previousWeek() { _weekStart.value = _weekStart.value.minusWeeks(1) }
 
-    fun nextWeek() {
-        val next = _weekStart.value.plusWeeks(1)
-        val thisWeek = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        if (!next.isAfter(thisWeek)) _weekStart.value = next
-    }
+    fun nextWeek() { _weekStart.value = computeNextWeekStart(_weekStart.value) }
 
-    fun getTodayTotalMinutes(sessions: List<WorkSession>): Int {
-        val done = sessions.filter { it.endTime != null }.sumOf { it.durationMinutes }
-        val ongoing = if (isWorking.value) (elapsedSeconds.value / 60).toInt() else 0
-        return done + ongoing
-    }
+    fun getTodayTotalMinutes(sessions: List<WorkSession>): Int =
+        com.zygabad.worktimerecorder.util.getTodayTotalMinutes(sessions, isWorking.value, elapsedSeconds.value)
 
     fun getDayMinutes(date: String, sessions: List<WorkSession>): Int =
-        sessions.filter { it.date == date }.sumOf { sessionMinutes(it) }
+        com.zygabad.worktimerecorder.util.getDayMinutes(date, sessions)
 
     fun sessionMinutes(session: WorkSession): Int =
-        session.durationMinutes.takeIf { it > 0 }
-            ?: (((session.endTime ?: System.currentTimeMillis()) - session.startTime) / 60_000).toInt()
+        com.zygabad.worktimerecorder.util.sessionMinutes(session, System.currentTimeMillis())
 
-    fun formatMinutes(min: Int): String {
-        val h = min / 60; val m = min % 60
-        return "${h}h ${m.toString().padStart(2, '0')}m"
-    }
+    fun formatMinutes(min: Int): String = com.zygabad.worktimerecorder.util.formatMinutes(min)
 
-    fun formatSeconds(sec: Long): String {
-        val h = sec / 3600; val m = (sec % 3600) / 60; val s = sec % 60
-        return if (h > 0) "${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
-        else "${m}:${s.toString().padStart(2, '0')}"
-    }
+    fun formatSeconds(sec: Long): String = com.zygabad.worktimerecorder.util.formatSeconds(sec)
 
-    fun getWeekLabel(weekStart: LocalDate): String {
-        val end = weekStart.plusDays(6)
-        val fmtShort = DateTimeFormatter.ofPattern("d MMM", Locale("pl"))
-        return "${weekStart.format(fmtShort)} – ${end.format(fmtShort)}"
-    }
+    fun getWeekLabel(weekStart: LocalDate): String = com.zygabad.worktimerecorder.util.getWeekLabel(weekStart)
 
     fun previousMonth() { _monthStart.value = _monthStart.value.minusMonths(1) }
 
-    fun nextMonth() {
-        val next = _monthStart.value.plusMonths(1)
-        val thisMonth = LocalDate.now().withDayOfMonth(1)
-        if (!next.isAfter(thisMonth)) _monthStart.value = next
-    }
+    fun nextMonth() { _monthStart.value = computeNextMonthStart(_monthStart.value) }
 
-    fun getMonthLabel(monthStart: LocalDate): String {
-        val fmtMonth = DateTimeFormatter.ofPattern("LLLL yyyy", Locale("pl"))
-        return monthStart.format(fmtMonth)
-    }
+    fun getMonthLabel(monthStart: LocalDate): String = com.zygabad.worktimerecorder.util.getMonthLabel(monthStart)
 }

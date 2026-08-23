@@ -65,4 +65,12 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // JVM unit tests (app/src/test) — no Robolectric/instrumentation: WorkDao is faked in-memory,
+    // and PrefsManager is exercised for real against a hand-written fake SharedPreferences, with
+    // only android.content.Context mocked (an abstract class, mockable without the inline mock
+    // maker / final-class support Mockito needs for concrete Kotlin classes).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("org.mockito:mockito-core:5.11.0")
 }
