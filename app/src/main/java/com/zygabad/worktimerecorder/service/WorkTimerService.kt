@@ -24,6 +24,12 @@ class WorkTimerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification("Czas pracy jest liczony..."))
+        // Redundant safety-net refresh: the loop below only refreshes the widget every 60s, and
+        // its FIRST refresh only fires after the first delay(60_000) — so if the widget's own
+        // updateAll() from ToggleTimerAction's tap handler doesn't visually land for any reason,
+        // the widget picture was stuck showing the old state for up to a full minute with no
+        // faster fallback. This makes the fallback immediate instead of 60s-delayed.
+        scope.launch { WorkTimerGlanceWidget().updateAll(this@WorkTimerService) }
         scope.launch {
             while (isActive) {
                 delay(60_000)
