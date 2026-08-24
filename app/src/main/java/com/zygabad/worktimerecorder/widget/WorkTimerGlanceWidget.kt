@@ -3,12 +3,9 @@ package com.zygabad.worktimerecorder.widget
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.*
 import androidx.glance.action.clickable
-import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.provideContent
@@ -19,34 +16,25 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.zygabad.worktimerecorder.data.PrefsManager
-import com.zygabad.worktimerecorder.data.WorkDatabase
-import com.zygabad.worktimerecorder.util.formatMinutes
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
-private val COMPACT_SIZE = DpSize(40.dp, 40.dp)
-private val WIDE_SIZE = DpSize(110.dp, 40.dp)
-private val TALL_SIZE = DpSize(110.dp, 110.dp)
-
+/**
+ * Deliberately reads only PrefsManager (no DB query) and uses the default SizeMode.Single —
+ * a prior version added SizeMode.Responsive plus a Room query here to show a "today total"
+ * stat at a bigger widget size, which is the most likely cause of a ~1 minute delay before
+ * the widget visually reflected a toggle (vs. instant before that change). Reliability of the
+ * core start/stop feedback matters far more than the bigger-size stat display, so that's
+ * reverted rather than chasing the exact mechanism without device logs.
+ */
 class WorkTimerGlanceWidget : GlanceAppWidget() {
-
-    override val sizeMode = SizeMode.Responsive(setOf(COMPACT_SIZE, WIDE_SIZE, TALL_SIZE))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = PrefsManager(context)
-        val todayStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-        val todaySessions = WorkDatabase.getDatabase(context).workDao().getSessionsForDateOnce(todayStr)
-        val doneMinutes = todaySessions.filter { it.endTime != null }.sumOf { it.durationMinutes }
-        val liveMinutes = if (prefs.isWorking && prefs.currentSessionStart > 0)
-            ((System.currentTimeMillis() - prefs.currentSessionStart) / 60_000).toInt() else 0
-        val todayMinutes = doneMinutes + liveMinutes
-
-        provideContent { WidgetContent(prefs, todayMinutes) }
+        provideContent { WidgetContent(prefs) }
     }
 }
 
 @Composable
-private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
+private fun WidgetContent(prefs: PrefsManager) {
     val isWorking = prefs.isWorking
     val startTime = prefs.currentSessionStart
     val targetMs = prefs.targetWorkMinutes * 60_000L
@@ -55,7 +43,6 @@ private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
     val isOvertime = isWorking && remainingMs <= 0
 
     val bgColor = if (isWorking) Color(0xFF1B5E20) else Color(0xFF263238)
-    val isWide = LocalSize.current.width >= WIDE_SIZE.width
 
     Box(
         modifier = GlanceModifier
@@ -64,72 +51,31 @@ private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
             .clickable(actionRunCallback<ToggleTimerAction>()),
         contentAlignment = Alignment.Center
     ) {
-        if (isWide) {
-            Row(
-                modifier = GlanceModifier.fillMaxSize().padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CountdownColumn(isWorking, isOvertime, remainingMs, modifier = GlanceModifier.defaultWeight())
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    modifier = GlanceModifier.defaultWeight()
-                ) {
-                    Text(
-                        text = "Dziś",
-                        style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (isWorking) {
+                Text(
+                    text = if (isOvertime) "+${formatRemaining(-remainingMs)}" else formatRemaining(remainingMs),
+                    style = TextStyle(
+                        color = if (isOvertime) ColorProvider(Color(0xFFFFB74D)) else ColorProvider(Color.White),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
-                    Text(
-                        text = formatMinutes(todayMinutes),
-                        style = TextStyle(
-                            color = ColorProvider(Color.White),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    )
-                    Text(
-                        text = "cel ${formatMinutes(prefs.targetWorkMinutes)}",
-                        style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 8.sp)
-                    )
-                }
-            }
-        } else {
-            CountdownColumn(isWorking, isOvertime, remainingMs)
-        }
-    }
-}
-
-@Composable
-private fun CountdownColumn(
-    isWorking: Boolean,
-    isOvertime: Boolean,
-    remainingMs: Long,
-    modifier: GlanceModifier = GlanceModifier
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        if (isWorking) {
-            Text(
-                text = if (isOvertime) "+${formatRemaining(-remainingMs)}" else formatRemaining(remainingMs),
-                style = TextStyle(
-                    color = if (isOvertime) ColorProvider(Color(0xFFFFB74D)) else ColorProvider(Color.White),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
                 )
-            )
-            Text(
-                text = if (isOvertime) "nadgodziny" else "do końca",
-                style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
-            )
-        } else {
-            Text(
-                text = "▶",
-                style = TextStyle(color = ColorProvider(Color.White), fontSize = 22.sp)
-            )
-            Text(
-                text = "START",
-                style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
-            )
+                Text(
+                    text = if (isOvertime) "nadgodziny" else "do końca",
+                    style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
+                )
+            } else {
+                Text(
+                    text = "▶",
+                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 22.sp)
+                )
+                Text(
+                    text = "START",
+                    style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
+                )
+            }
         }
     }
 }
