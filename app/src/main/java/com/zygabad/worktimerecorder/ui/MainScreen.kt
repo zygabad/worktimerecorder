@@ -62,7 +62,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val weekStart by vm.weekStart.collectAsState()
     val monthSessions by vm.monthSessions.collectAsState()
     val monthStart by vm.monthStart.collectAsState()
-    val todayMinutes = vm.getTodayTotalMinutes(todaySessions)
+    val todayMinutes = vm.getTodayTotalMinutes(todaySessions, isWorking, elapsed)
     val targetMinutes = vm.prefs.targetWorkMinutes
     val isOvertime = todayMinutes > targetMinutes
     val remainingMinutes = (targetMinutes - todayMinutes).coerceAtLeast(0)

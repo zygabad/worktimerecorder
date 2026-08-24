@@ -135,8 +135,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun nextWeek() { _weekStart.value = computeNextWeekStart(_weekStart.value) }
 
-    fun getTodayTotalMinutes(sessions: List<WorkSession>): Int =
-        com.zygabad.worktimerecorder.util.getTodayTotalMinutes(sessions, isWorking.value, elapsedSeconds.value)
+    fun getTodayTotalMinutes(sessions: List<WorkSession>, isWorking: Boolean, elapsedSeconds: Long): Int =
+        com.zygabad.worktimerecorder.util.getTodayTotalMinutes(sessions, isWorking, elapsedSeconds)
 
     fun getDayMinutes(date: String, sessions: List<WorkSession>): Int =
         com.zygabad.worktimerecorder.util.getDayMinutes(date, sessions, System.currentTimeMillis())
