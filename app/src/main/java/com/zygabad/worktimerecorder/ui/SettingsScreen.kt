@@ -15,6 +15,33 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 
+@Composable
+private fun HourMinuteFields(
+    hours: String,
+    onHoursChange: (String) -> Unit,
+    minutes: String,
+    onMinutesChange: (String) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = hours,
+            onValueChange = { if (it.length <= 2) onHoursChange(it) },
+            label = { Text("Godziny") },
+            suffix = { Text("h") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.weight(1f)
+        )
+        OutlinedTextField(
+            value = minutes,
+            onValueChange = { if (it.length <= 2) onMinutesChange(it) },
+            label = { Text("Minuty") },
+            suffix = { Text("min") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()) {
@@ -23,6 +50,17 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
     var minutes by remember { mutableStateOf((initialTarget % 60).toString()) }
     var saved by remember { mutableStateOf(false) }
     val currentTarget = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
+
+    val initialYellow = vm.prefs.yellowThresholdMinutes
+    var yellowH by remember { mutableStateOf((initialYellow / 60).toString()) }
+    var yellowM by remember { mutableStateOf((initialYellow % 60).toString()) }
+    val initialOrange = vm.prefs.orangeThresholdMinutes
+    var orangeH by remember { mutableStateOf((initialOrange / 60).toString()) }
+    var orangeM by remember { mutableStateOf((initialOrange % 60).toString()) }
+    val initialRed = vm.prefs.redThresholdMinutes
+    var redH by remember { mutableStateOf((initialRed / 60).toString()) }
+    var redM by remember { mutableStateOf((initialRed % 60).toString()) }
+    var colorsSaved by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -123,6 +161,52 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            HorizontalDivider()
+            Text("Kolory widgetu", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Zielony to normalny stan pracy. Poniższe progi zmieniają tło widgetu na żółty/pomarańczowy/czerwony.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text("Żółty, gdy do celu zostanie mniej niż:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = yellowH, onHoursChange = { yellowH = it; colorsSaved = false },
+                minutes = yellowM, onMinutesChange = { yellowM = it; colorsSaved = false }
+            )
+
+            Text("Pomarańczowy po przekroczeniu:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = orangeH, onHoursChange = { orangeH = it; colorsSaved = false },
+                minutes = orangeM, onMinutesChange = { orangeM = it; colorsSaved = false }
+            )
+
+            Text("Czerwony po przekroczeniu:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = redH, onHoursChange = { redH = it; colorsSaved = false },
+                minutes = redM, onMinutesChange = { redM = it; colorsSaved = false }
+            )
+
+            Button(
+                onClick = {
+                    vm.prefs.yellowThresholdMinutes = (yellowH.toIntOrNull() ?: 1) * 60 + (yellowM.toIntOrNull() ?: 30)
+                    vm.prefs.orangeThresholdMinutes = (orangeH.toIntOrNull() ?: 8) * 60 + (orangeM.toIntOrNull() ?: 0)
+                    vm.prefs.redThresholdMinutes = (redH.toIntOrNull() ?: 8) * 60 + (redM.toIntOrNull() ?: 30)
+                    colorsSaved = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Zapisz progi kolorów") }
+
+            if (colorsSaved) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Text(
+                        "✓ Zapisano progi kolorów",
+                        modifier = Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
 
             HorizontalDivider()
             val context = LocalContext.current
