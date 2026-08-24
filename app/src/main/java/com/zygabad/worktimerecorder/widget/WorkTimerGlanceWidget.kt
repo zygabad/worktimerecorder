@@ -33,6 +33,10 @@ class WorkTimerGlanceWidget : GlanceAppWidget() {
     }
 }
 
+private const val YELLOW_THRESHOLD_MINUTES = 90 // less than 1.5h left until the configured target
+private const val ORANGE_THRESHOLD_MINUTES = 8 * 60 // past 8h elapsed
+private const val RED_THRESHOLD_MINUTES = 8 * 60 + 30 // past 8h30m elapsed
+
 @Composable
 private fun WidgetContent(prefs: PrefsManager) {
     val isWorking = prefs.isWorking
@@ -42,7 +46,15 @@ private fun WidgetContent(prefs: PrefsManager) {
     val remainingMs = targetMs - elapsedMs
     val isOvertime = isWorking && remainingMs <= 0
 
-    val bgColor = if (isWorking) Color(0xFF1B5E20) else Color(0xFF263238)
+    val elapsedMinutes = (elapsedMs / 60_000).toInt()
+    val remainingMinutes = (remainingMs / 60_000).toInt()
+    val bgColor = when {
+        !isWorking -> Color(0xFF263238)
+        elapsedMinutes >= RED_THRESHOLD_MINUTES -> Color(0xFFC62828) // red — past 8h30m
+        elapsedMinutes >= ORANGE_THRESHOLD_MINUTES -> Color(0xFFEF6C00) // orange — past 8h
+        remainingMinutes < YELLOW_THRESHOLD_MINUTES -> Color(0xFFF9A825) // yellow — under 1.5h left
+        else -> Color(0xFF1B5E20) // green — normal
+    }
 
     Box(
         modifier = GlanceModifier
