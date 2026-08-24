@@ -68,6 +68,17 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val remainingMinutes = (targetMinutes - todayMinutes).coerceAtLeast(0)
     val overtimeMinutes = (todayMinutes - targetMinutes).coerceAtLeast(0)
 
+    // Same green/yellow/orange/red thresholds as the widget, applied to today's total instead of
+    // just the current session so a second session picks up where the first left off.
+    val (statusContainer, statusContent) = when {
+        !isWorking -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        todayMinutes >= vm.prefs.redThresholdMinutes -> Color(0xFFC62828) to Color.White
+        todayMinutes >= vm.prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) to Color.White
+        remainingMinutes < vm.prefs.yellowThresholdMinutes -> Color(0xFFF9A825) to Color(0xFF3E2E00)
+        else -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
+    }
+    val statusContentMuted = statusContent.copy(alpha = 0.85f)
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -97,8 +108,8 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isWorking) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant
+                        containerColor = statusContainer,
+                        contentColor = statusContent
                     )
                 ) {
                     Column(
@@ -108,15 +119,15 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         Text(
                             text = if (isWorking) "Pracujesz" else "Wolny",
                             style = MaterialTheme.typography.labelLarge,
-                            color = if (isWorking) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = statusContent
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
                             text = if (isWorking) vm.formatSeconds(elapsed) else "00:00",
                             style = MaterialTheme.typography.displayMedium,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.Monospace,
+                            color = statusContent
                         )
                         if (isWorking) {
                             Spacer(Modifier.height(4.dp))
@@ -124,16 +135,14 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                 text = if (isOvertime) "Nadgodziny: +${vm.formatMinutes(overtimeMinutes)}"
                                        else "Pozostało: ${vm.formatMinutes(remainingMinutes)}",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = if (isOvertime) MaterialTheme.colorScheme.tertiary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = statusContentMuted,
                                 fontWeight = if (isOvertime) FontWeight.Bold else FontWeight.Normal
                             )
                             Spacer(Modifier.height(8.dp))
                             LinearProgressIndicator(
                                 progress = { (todayMinutes.toFloat() / targetMinutes).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                color = if (isOvertime) MaterialTheme.colorScheme.tertiary
-                                        else ProgressIndicatorDefaults.linearColor
+                                color = statusContent
                             )
                             Spacer(Modifier.height(12.dp))
                             val nowMs = System.currentTimeMillis()
@@ -142,17 +151,19 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("Koniec (8h)", style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        color = statusContentMuted)
                                     Text(finishClock(480), style = MaterialTheme.typography.titleMedium,
                                         fontWeight = if (targetMinutes == 480) FontWeight.Bold else FontWeight.Normal,
-                                        fontFamily = FontFamily.Monospace)
+                                        fontFamily = FontFamily.Monospace,
+                                        color = statusContent)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("Koniec (8h30m)", style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        color = statusContentMuted)
                                     Text(finishClock(510), style = MaterialTheme.typography.titleMedium,
                                         fontWeight = if (targetMinutes == 510) FontWeight.Bold else FontWeight.Normal,
-                                        fontFamily = FontFamily.Monospace)
+                                        fontFamily = FontFamily.Monospace,
+                                        color = statusContent)
                                 }
                             }
                         }
@@ -177,7 +188,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         Text(
                             text = if (isWorking) "Kliknij aby zatrzymać" else "Kliknij aby rozpocząć",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = statusContentMuted
                         )
                     }
                 }
