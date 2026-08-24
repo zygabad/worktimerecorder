@@ -8,7 +8,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -119,30 +118,11 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 "2. Wybierz Widżety\n" +
                 "3. Znajdź WorkTimeRecorder\n" +
                 "4. Przeciągnij na ekran\n\n" +
-                "Widżet pokazuje czas pozostały do końca pracy i pozwala start/stop tapnięciem.",
+                "Jedno tapnięcie otwiera aplikację. Dwa szybkie tapnięcia (w ciągu ok. pół sekundy) " +
+                "startują/zatrzymują licznik bez otwierania aplikacji.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
-            var requireDoubleTap by remember { mutableStateOf(vm.prefs.requireDoubleTap) }
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Wymagaj dwóch tapnięć", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Zabezpieczenie przed przypadkowym uruchomieniem — drugie tapnięcie musi nastąpić w ciągu ok. pół sekundy.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = requireDoubleTap,
-                    onCheckedChange = { requireDoubleTap = it; vm.prefs.requireDoubleTap = it }
-                )
-            }
 
             HorizontalDivider()
             val context = LocalContext.current
