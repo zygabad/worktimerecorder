@@ -43,12 +43,11 @@ private fun WidgetContent(prefs: PrefsManager) {
     val isOvertime = isWorking && remainingMs <= 0
 
     val elapsedMinutes = (elapsedMs / 60_000).toInt()
-    val remainingMinutes = (remainingMs / 60_000).toInt()
     val bgColor = when {
         !isWorking -> Color(0xFF263238)
         elapsedMinutes >= prefs.redThresholdMinutes -> Color(0xFFC62828) // red — past configured threshold
         elapsedMinutes >= prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) // orange — past configured threshold
-        remainingMinutes < prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — under configured minutes left
+        elapsedMinutes >= prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — past configured threshold
         elapsedMinutes >= prefs.blueThresholdMinutes -> Color(0xFF1565C0) // blue — configured halfway-ish threshold
         else -> Color(0xFF1B5E20) // green — normal
     }

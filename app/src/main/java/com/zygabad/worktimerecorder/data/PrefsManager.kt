@@ -33,8 +33,9 @@ class PrefsManager(context: Context) {
         get() = prefs.getInt("blue_threshold_minutes", targetWorkMinutes / 2)
         set(value) = prefs.edit { putInt("blue_threshold_minutes", value) }
 
+    // Elapsed-minutes threshold, same direction as blue/orange/red (default: 90min before target).
     var yellowThresholdMinutes: Int
-        get() = prefs.getInt("yellow_threshold_minutes", 90)
+        get() = prefs.getInt("yellow_threshold_minutes", (targetWorkMinutes - 90).coerceAtLeast(0))
         set(value) = prefs.edit { putInt("yellow_threshold_minutes", value) }
 
     var orangeThresholdMinutes: Int

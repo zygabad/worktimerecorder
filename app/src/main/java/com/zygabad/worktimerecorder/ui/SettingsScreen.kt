@@ -180,7 +180,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 minutes = blueM, onMinutesChange = { blueM = it; colorsSaved = false }
             )
 
-            Text("Żółty, gdy do celu zostanie mniej niż:", style = MaterialTheme.typography.bodySmall)
+            Text("Żółty po przekroczeniu:", style = MaterialTheme.typography.bodySmall)
             HourMinuteFields(
                 hours = yellowH, onHoursChange = { yellowH = it; colorsSaved = false },
                 minutes = yellowM, onMinutesChange = { yellowM = it; colorsSaved = false }
@@ -201,7 +201,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             Button(
                 onClick = {
                     vm.prefs.blueThresholdMinutes = (blueH.toIntOrNull() ?: 4) * 60 + (blueM.toIntOrNull() ?: 15)
-                    vm.prefs.yellowThresholdMinutes = (yellowH.toIntOrNull() ?: 1) * 60 + (yellowM.toIntOrNull() ?: 30)
+                    vm.prefs.yellowThresholdMinutes = (yellowH.toIntOrNull() ?: 7) * 60 + (yellowM.toIntOrNull() ?: 0)
                     vm.prefs.orangeThresholdMinutes = (orangeH.toIntOrNull() ?: 8) * 60 + (orangeM.toIntOrNull() ?: 0)
                     vm.prefs.redThresholdMinutes = (redH.toIntOrNull() ?: 8) * 60 + (redM.toIntOrNull() ?: 30)
                     colorsSaved = true
