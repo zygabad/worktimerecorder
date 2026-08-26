@@ -14,7 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private const val DOUBLE_TAP_WINDOW_MS = 600L
+private const val DOUBLE_TAP_WINDOW_MS = 1000L
 
 /**
  * Single tap opens the app; only a confirmed double tap starts/stops work — a lone tap has no
