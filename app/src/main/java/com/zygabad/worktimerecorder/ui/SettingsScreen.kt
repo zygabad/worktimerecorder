@@ -165,7 +165,8 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             HorizontalDivider()
             Text("Kolory widgetu", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Zielony to normalny stan pracy. Poniższe progi zmieniają tło widgetu na żółty/pomarańczowy/czerwony.",
+                "Zielony to normalny stan pracy, niebieski pojawia się automatycznie w połowie ustawionego celu. " +
+                "Poniższe progi zmieniają tło widgetu na żółty/pomarańczowy/czerwony.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
