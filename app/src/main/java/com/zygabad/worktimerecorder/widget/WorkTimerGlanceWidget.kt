@@ -49,7 +49,7 @@ private fun WidgetContent(prefs: PrefsManager) {
         elapsedMinutes >= prefs.redThresholdMinutes -> Color(0xFFC62828) // red — past configured threshold
         elapsedMinutes >= prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) // orange — past configured threshold
         remainingMinutes < prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — under configured minutes left
-        elapsedMinutes >= prefs.targetWorkMinutes / 2 -> Color(0xFF1565C0) // blue — halfway through the target
+        elapsedMinutes >= prefs.blueThresholdMinutes -> Color(0xFF1565C0) // blue — configured halfway-ish threshold
         else -> Color(0xFF1B5E20) // green — normal
     }
 

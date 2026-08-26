@@ -28,6 +28,11 @@ class PrefsManager(context: Context) {
         set(value) = prefs.edit { putLong("last_widget_tap_time", value) }
 
     // Widget background color thresholds, all in minutes.
+    // No stored value yet -> defaults to half of whatever the target currently is.
+    var blueThresholdMinutes: Int
+        get() = prefs.getInt("blue_threshold_minutes", targetWorkMinutes / 2)
+        set(value) = prefs.edit { putInt("blue_threshold_minutes", value) }
+
     var yellowThresholdMinutes: Int
         get() = prefs.getInt("yellow_threshold_minutes", 90)
         set(value) = prefs.edit { putInt("yellow_threshold_minutes", value) }

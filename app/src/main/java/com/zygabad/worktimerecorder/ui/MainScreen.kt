@@ -75,7 +75,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
         todayMinutes >= vm.prefs.redThresholdMinutes -> Color(0xFFC62828) to Color.White
         todayMinutes >= vm.prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) to Color.White
         remainingMinutes < vm.prefs.yellowThresholdMinutes -> Color(0xFFF9A825) to Color(0xFF3E2E00)
-        todayMinutes >= targetMinutes / 2 -> Color(0xFF1565C0) to Color.White
+        todayMinutes >= vm.prefs.blueThresholdMinutes -> Color(0xFF1565C0) to Color.White
         else -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
     }
     val statusContentMuted = statusContent.copy(alpha = 0.85f)

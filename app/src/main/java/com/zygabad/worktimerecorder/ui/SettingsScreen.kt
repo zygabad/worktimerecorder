@@ -51,6 +51,9 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
     var saved by remember { mutableStateOf(false) }
     val currentTarget = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
 
+    val initialBlue = vm.prefs.blueThresholdMinutes
+    var blueH by remember { mutableStateOf((initialBlue / 60).toString()) }
+    var blueM by remember { mutableStateOf((initialBlue % 60).toString()) }
     val initialYellow = vm.prefs.yellowThresholdMinutes
     var yellowH by remember { mutableStateOf((initialYellow / 60).toString()) }
     var yellowM by remember { mutableStateOf((initialYellow % 60).toString()) }
@@ -171,6 +174,12 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            Text("Niebieski po przekroczeniu:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = blueH, onHoursChange = { blueH = it; colorsSaved = false },
+                minutes = blueM, onMinutesChange = { blueM = it; colorsSaved = false }
+            )
+
             Text("Żółty, gdy do celu zostanie mniej niż:", style = MaterialTheme.typography.bodySmall)
             HourMinuteFields(
                 hours = yellowH, onHoursChange = { yellowH = it; colorsSaved = false },
@@ -191,6 +200,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
 
             Button(
                 onClick = {
+                    vm.prefs.blueThresholdMinutes = (blueH.toIntOrNull() ?: 4) * 60 + (blueM.toIntOrNull() ?: 15)
                     vm.prefs.yellowThresholdMinutes = (yellowH.toIntOrNull() ?: 1) * 60 + (yellowM.toIntOrNull() ?: 30)
                     vm.prefs.orangeThresholdMinutes = (orangeH.toIntOrNull() ?: 8) * 60 + (orangeM.toIntOrNull() ?: 0)
                     vm.prefs.redThresholdMinutes = (redH.toIntOrNull() ?: 8) * 60 + (redM.toIntOrNull() ?: 30)
