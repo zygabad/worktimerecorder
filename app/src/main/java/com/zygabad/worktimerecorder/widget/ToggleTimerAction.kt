@@ -86,6 +86,13 @@ class ToggleTimerAction : ActionCallback {
             } catch (_: Exception) {}
 
             WorkTimerGlanceWidget().updateAll(context)
+
+            // Belt-and-suspenders: re-push shortly after in case the widget host coalesces/drops
+            // an update that lands in the same instant as the foreground-service transition above.
+            actionScope.launch {
+                delay(1500)
+                WorkTimerGlanceWidget().updateAll(context)
+            }
             return
         }
 

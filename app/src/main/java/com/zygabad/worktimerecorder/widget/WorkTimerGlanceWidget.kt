@@ -16,25 +16,35 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.zygabad.worktimerecorder.data.PrefsManager
+import com.zygabad.worktimerecorder.data.WorkDatabase
+import com.zygabad.worktimerecorder.util.formatMinutes
+import com.zygabad.worktimerecorder.util.getDayMinutes
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
- * Deliberately reads only PrefsManager (no DB query) and uses the default SizeMode.Single —
- * a prior version added SizeMode.Responsive plus a Room query here to show a "today total"
- * stat at a bigger widget size, which is the most likely cause of a ~1 minute delay before
- * the widget visually reflected a toggle (vs. instant before that change). Reliability of the
- * core start/stop feedback matters far more than the bigger-size stat display, so that's
- * reverted rather than chasing the exact mechanism without device logs.
+ * Uses the default SizeMode.Single. Queries the DB for today's total only while stopped (to show
+ * "worked so far today"); while working, no DB read is needed since the live counter comes from
+ * PrefsManager alone — kept minimal since a prior bigger-widget variant that queried the DB
+ * unconditionally was suspected (wrongly, in hindsight — the delay persisted even after removing
+ * it) of causing a ~1 minute lag before the widget visually reflected a toggle.
  */
 class WorkTimerGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = PrefsManager(context)
-        provideContent { WidgetContent(prefs) }
+        val todayMinutes = if (!prefs.isWorking) {
+            val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            val today = LocalDate.now().format(fmt)
+            val sessions = WorkDatabase.getDatabase(context).workDao().getSessionsForDateOnce(today)
+            getDayMinutes(today, sessions)
+        } else 0
+        provideContent { WidgetContent(prefs, todayMinutes) }
     }
 }
 
 @Composable
-private fun WidgetContent(prefs: PrefsManager) {
+private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
     val isWorking = prefs.isWorking
     val startTime = prefs.currentSessionStart
     val targetMs = prefs.targetWorkMinutes * 60_000L
@@ -44,7 +54,7 @@ private fun WidgetContent(prefs: PrefsManager) {
 
     val elapsedMinutes = (elapsedMs / 60_000).toInt()
     val bgColor = when {
-        !isWorking -> Color(0xFF263238)
+        !isWorking -> Color(0xFF263238) // gray — stopped, no color-coded urgency
         elapsedMinutes >= prefs.redThresholdMinutes -> Color(0xFFC62828) // red — past configured threshold
         elapsedMinutes >= prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) // orange — past configured threshold
         elapsedMinutes >= prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — past configured threshold
@@ -76,12 +86,17 @@ private fun WidgetContent(prefs: PrefsManager) {
                 )
             } else {
                 Text(
-                    text = "▶",
-                    style = TextStyle(color = ColorProvider(Color.White), fontSize = 22.sp)
+                    text = formatMinutes(todayMinutes),
+                    style = TextStyle(
+                        color = ColorProvider(Color(0xFFB0BEC5)),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
                 )
                 Text(
-                    text = "START",
-                    style = TextStyle(color = ColorProvider(Color(0xFF90A4AE)), fontSize = 9.sp)
+                    text = "dziś",
+                    style = TextStyle(color = ColorProvider(Color(0xFF78909C)), fontSize = 9.sp)
                 )
             }
         }
