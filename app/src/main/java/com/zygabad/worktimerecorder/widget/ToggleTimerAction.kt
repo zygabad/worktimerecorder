@@ -12,6 +12,8 @@ import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val DOUBLE_TAP_WINDOW_MS = 1000L
@@ -20,25 +22,43 @@ private const val DOUBLE_TAP_WINDOW_MS = 1000L
  * Single tap opens the app; only a confirmed double tap starts/stops work — a lone tap has no
  * side effect besides opening the app, so there's no way to accidentally toggle the timer.
  *
- * Each tap is its own ActionCallback invocation, so distinguishing "this is a genuine single tap"
- * from "this is the first half of a double tap" can only be done by waiting out the window: if a
- * confirming second tap hasn't shown up by the time this tap's own delay elapses, prefs.lastWidgetTapTime
- * still equals the timestamp this call itself recorded (nothing else touched it), so it opens the
- * app. If a second tap DID arrive in the meantime, that second call's own check sees itself within
- * the window, toggles, and consumes the timestamp (-1L) — so the first call's delayed check no
- * longer matches and it correctly does nothing.
+ * Each tap is its own ActionCallback invocation (its own coroutine), so distinguishing "this is a
+ * genuine single tap" from "this is the first half of a double tap" is done by waiting out the
+ * window: if a confirming second tap hasn't shown up by the time this tap's own delay elapses,
+ * prefs.lastWidgetTapTime still equals the timestamp this call itself recorded (nothing else
+ * touched it), so it opens the app. If a second tap DID arrive in the meantime, that second call's
+ * own check sees itself within the window, toggles, and consumes the timestamp (-1L) — so the
+ * first call's delayed check no longer matches and it correctly does nothing.
+ *
+ * The read-then-write of lastWidgetTapTime that decides this must be atomic: two rapid taps launch
+ * two independent coroutines, and without a lock both can read the old timestamp before either
+ * writes the new one — then neither recognizes the other as a confirming second tap, and a real
+ * double-tap silently produces zero toggles. mutex here serializes just that decision (a JVM-wide
+ * singleton via companion object, which is exactly the "same process" scope this needs).
  */
 class ToggleTimerAction : ActionCallback {
+    companion object {
+        private val tapMutex = Mutex()
+    }
+
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val prefs = PrefsManager(context)
         val now = System.currentTimeMillis()
-        val sinceLastTap = now - prefs.lastWidgetTapTime
-        prefs.lastWidgetTapTime = now
 
-        if (sinceLastTap <= DOUBLE_TAP_WINDOW_MS) {
-            // Confirmed second tap — toggle work, consume the pending timestamp.
-            prefs.lastWidgetTapTime = -1L
+        val isConfirmedDoubleTap = tapMutex.withLock {
+            val sinceLastTap = now - prefs.lastWidgetTapTime
+            if (sinceLastTap in 0..DOUBLE_TAP_WINDOW_MS) {
+                // Confirmed second tap — consume the pending timestamp so the first tap's
+                // delayed check (below) sees it changed and does nothing.
+                prefs.lastWidgetTapTime = -1L
+                true
+            } else {
+                prefs.lastWidgetTapTime = now
+                false
+            }
+        }
 
+        if (isConfirmedDoubleTap) {
             withContext(Dispatchers.IO) {
                 val repo = WorkRepository(WorkDatabase.getDatabase(context).workDao())
                 repo.toggleWork(prefs)
