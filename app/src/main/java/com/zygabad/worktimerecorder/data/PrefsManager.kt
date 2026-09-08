@@ -45,4 +45,13 @@ class PrefsManager(context: Context) {
     var redThresholdMinutes: Int
         get() = prefs.getInt("red_threshold_minutes", 8 * 60 + 30)
         set(value) = prefs.edit { putInt("red_threshold_minutes", value) }
+
+    // Quick-target pills shown above the counter on the main screen (tap one to switch the
+    // active target mid-session). Always exactly 4 values; falls back to the default set if the
+    // stored CSV is missing/malformed rather than partially trusting it.
+    var quickPresetsMinutes: List<Int>
+        get() = prefs.getString("quick_presets_minutes", null)
+            ?.split(",")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 4 }
+            ?: listOf(8 * 60, 8 * 60 + 30, 9 * 60, 10 * 60)
+        set(value) = prefs.edit { putString("quick_presets_minutes", value.joinToString(",")) }
 }

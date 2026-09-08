@@ -51,6 +51,17 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
     var saved by remember { mutableStateOf(false) }
     val currentTarget = (hours.toIntOrNull() ?: 0) * 60 + (minutes.toIntOrNull() ?: 0)
 
+    val initialPresets = vm.prefs.quickPresetsMinutes
+    var preset1H by remember { mutableStateOf((initialPresets[0] / 60).toString()) }
+    var preset1M by remember { mutableStateOf((initialPresets[0] % 60).toString()) }
+    var preset2H by remember { mutableStateOf((initialPresets[1] / 60).toString()) }
+    var preset2M by remember { mutableStateOf((initialPresets[1] % 60).toString()) }
+    var preset3H by remember { mutableStateOf((initialPresets[2] / 60).toString()) }
+    var preset3M by remember { mutableStateOf((initialPresets[2] % 60).toString()) }
+    var preset4H by remember { mutableStateOf((initialPresets[3] / 60).toString()) }
+    var preset4M by remember { mutableStateOf((initialPresets[3] % 60).toString()) }
+    var presetsSaved by remember { mutableStateOf(false) }
+
     val initialBlue = vm.prefs.blueThresholdMinutes
     var blueH by remember { mutableStateOf((initialBlue / 60).toString()) }
     var blueM by remember { mutableStateOf((initialBlue % 60).toString()) }
@@ -145,6 +156,57 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                     Text(
                         "✓ Zapisano: ${hours}h ${minutes}min",
+                        modifier = Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            HorizontalDivider()
+            Text("Szybkie presety celu", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Pigułki nad licznikiem na ekranie głównym — tapnięcie od razu przełącza cel " +
+                "i przelicza godzinę zakończenia pracy. Ustaw tu ich 4 wartości.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text("Preset 1:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = preset1H, onHoursChange = { preset1H = it; presetsSaved = false },
+                minutes = preset1M, onMinutesChange = { preset1M = it; presetsSaved = false }
+            )
+            Text("Preset 2:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = preset2H, onHoursChange = { preset2H = it; presetsSaved = false },
+                minutes = preset2M, onMinutesChange = { preset2M = it; presetsSaved = false }
+            )
+            Text("Preset 3:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = preset3H, onHoursChange = { preset3H = it; presetsSaved = false },
+                minutes = preset3M, onMinutesChange = { preset3M = it; presetsSaved = false }
+            )
+            Text("Preset 4:", style = MaterialTheme.typography.bodySmall)
+            HourMinuteFields(
+                hours = preset4H, onHoursChange = { preset4H = it; presetsSaved = false },
+                minutes = preset4M, onMinutesChange = { preset4M = it; presetsSaved = false }
+            )
+            Button(
+                onClick = {
+                    vm.prefs.quickPresetsMinutes = listOf(
+                        (preset1H.toIntOrNull() ?: 8) * 60 + (preset1M.toIntOrNull() ?: 0),
+                        (preset2H.toIntOrNull() ?: 8) * 60 + (preset2M.toIntOrNull() ?: 30),
+                        (preset3H.toIntOrNull() ?: 9) * 60 + (preset3M.toIntOrNull() ?: 0),
+                        (preset4H.toIntOrNull() ?: 10) * 60 + (preset4M.toIntOrNull() ?: 0)
+                    )
+                    presetsSaved = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Zapisz presety") }
+
+            if (presetsSaved) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Text(
+                        "✓ Zapisano presety",
                         modifier = Modifier.padding(12.dp),
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )

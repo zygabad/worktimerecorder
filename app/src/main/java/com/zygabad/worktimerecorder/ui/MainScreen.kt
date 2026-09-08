@@ -1,10 +1,13 @@
 package com.zygabad.worktimerecorder.ui
 
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -149,22 +152,34 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             val nowMs = System.currentTimeMillis()
                             fun finishClock(targetMin: Int): String =
                                 formatClock(nowMs + (targetMin - todayMinutes).coerceAtLeast(0) * 60_000L)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Koniec (8h)", style = MaterialTheme.typography.bodySmall,
-                                        color = statusContentMuted)
-                                    Text(finishClock(480), style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = if (targetMinutes == 480) FontWeight.Bold else FontWeight.Normal,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = statusContent)
-                                }
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Koniec (8h30m)", style = MaterialTheme.typography.bodySmall,
-                                        color = statusContentMuted)
-                                    Text(finishClock(510), style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = if (targetMinutes == 510) FontWeight.Bold else FontWeight.Normal,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = statusContent)
+                            fun presetLabel(min: Int): String {
+                                val h = min / 60; val m = min % 60
+                                return if (m == 0) "${h}h" else "${h}h${m}m"
+                            }
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                vm.prefs.quickPresetsMinutes.forEach { presetMin ->
+                                    val selected = targetMinutes == presetMin
+                                    Surface(
+                                        onClick = { vm.prefs.targetWorkMinutes = presetMin },
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = if (selected) statusContent.copy(alpha = 0.2f) else Color.Transparent,
+                                        border = BorderStroke(1.dp, statusContentMuted)
+                                    ) {
+                                        Column(
+                                            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("Koniec (${presetLabel(presetMin)})", style = MaterialTheme.typography.bodySmall,
+                                                color = statusContentMuted)
+                                            Text(finishClock(presetMin), style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = statusContent)
+                                        }
+                                    }
                                 }
                             }
                         }
