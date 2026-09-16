@@ -71,6 +71,26 @@ class TimeCalculationsTest {
         assertEquals(110, getTodayTotalMinutes(closed, isWorking = true, elapsedSeconds = 10 * 60))
     }
 
+    // --- Bug: the main screen's big ticking clock showed only the current session's elapsed
+    // time, disagreeing with "Przepracowano"/"Pozostało" (which already summed the whole day) —
+    // e.g. after a break, it reset to the new session's few minutes instead of continuing from
+    // the earlier session's total. getTodayTotalSeconds must resume from the prior sessions'
+    // total, in seconds, so the big clock and the rest of the screen agree. ---
+
+    @Test
+    fun `getTodayTotalSeconds resumes from earlier sessions after a break, not just the live session`() {
+        // 5h02m already done earlier today, then a break, then a new session running 23m45s live.
+        val earlier = listOf(WorkSession(date = "2026-08-20", startTime = 0L, endTime = 1L, durationMinutes = 5 * 60 + 2))
+        val liveElapsed = 23 * 60 + 45L
+        assertEquals((5 * 60 + 2) * 60L + liveElapsed, getTodayTotalSeconds(earlier, isWorking = true, elapsedSeconds = liveElapsed))
+    }
+
+    @Test
+    fun `getTodayTotalSeconds ignores live elapsed when not working`() {
+        val closed = listOf(WorkSession(date = "2026-08-20", startTime = 0L, endTime = 1L, durationMinutes = 100))
+        assertEquals(100 * 60L, getTodayTotalSeconds(closed, isWorking = false, elapsedSeconds = 999))
+    }
+
     // --- combineDateTime: manual edit dialog picks an hour/minute for an existing date ---
 
     @Test

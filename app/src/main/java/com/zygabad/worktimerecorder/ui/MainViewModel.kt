@@ -138,6 +138,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun getTodayTotalMinutes(sessions: List<WorkSession>, isWorking: Boolean, elapsedSeconds: Long): Int =
         com.zygabad.worktimerecorder.util.getTodayTotalMinutes(sessions, isWorking, elapsedSeconds)
 
+    fun getTodayTotalSeconds(sessions: List<WorkSession>, isWorking: Boolean, elapsedSeconds: Long): Long =
+        com.zygabad.worktimerecorder.util.getTodayTotalSeconds(sessions, isWorking, elapsedSeconds)
+
     fun getDayMinutes(date: String, sessions: List<WorkSession>): Int =
         com.zygabad.worktimerecorder.util.getDayMinutes(date, sessions, System.currentTimeMillis())
 

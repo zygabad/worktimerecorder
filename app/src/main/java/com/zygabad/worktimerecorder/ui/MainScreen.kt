@@ -66,6 +66,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val monthSessions by vm.monthSessions.collectAsState()
     val monthStart by vm.monthStart.collectAsState()
     val todayMinutes = vm.getTodayTotalMinutes(todaySessions, isWorking, elapsed)
+    val todaySeconds = vm.getTodayTotalSeconds(todaySessions, isWorking, elapsed)
     val targetMinutes = vm.prefs.targetWorkMinutes
     val isOvertime = todayMinutes > targetMinutes
     val remainingMinutes = (targetMinutes - todayMinutes).coerceAtLeast(0)
@@ -127,7 +128,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = if (isWorking) vm.formatSeconds(elapsed) else "00:00",
+                            text = if (isWorking) vm.formatSeconds(todaySeconds) else "00:00",
                             style = MaterialTheme.typography.displayMedium,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,

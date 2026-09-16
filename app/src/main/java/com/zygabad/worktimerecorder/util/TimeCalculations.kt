@@ -49,6 +49,18 @@ fun getTodayTotalMinutes(sessions: List<WorkSession>, isWorking: Boolean, elapse
     return done + ongoing
 }
 
+/**
+ * Second-precision counterpart of getTodayTotalMinutes, for the main screen's live-ticking clock.
+ * That clock used to show only the current session's own elapsed seconds, which looked wrong
+ * after a break: it reset to a few minutes instead of resuming from the earlier session's total,
+ * disagreeing with "Przepracowano"/"Pozostało" right next to it (which already summed the day).
+ */
+fun getTodayTotalSeconds(sessions: List<WorkSession>, isWorking: Boolean, elapsedSeconds: Long): Long {
+    val doneSeconds = sessions.filter { it.endTime != null }.sumOf { it.durationMinutes.toLong() } * 60L
+    val ongoingSeconds = if (isWorking) elapsedSeconds else 0L
+    return doneSeconds + ongoingSeconds
+}
+
 fun combineDateTime(dateStr: String, hour: Int, minute: Int, zone: ZoneId = ZoneId.systemDefault()): Long {
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     return LocalDate.parse(dateStr, fmt).atTime(hour, minute).atZone(zone).toInstant().toEpochMilli()
