@@ -17,28 +17,25 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
+import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.util.formatMinutes
-import com.zygabad.worktimerecorder.util.getDayMinutes
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 /**
- * Uses the default SizeMode.Single. Queries the DB for today's total only while stopped (to show
- * "worked so far today"); while working, no DB read is needed since the live counter comes from
- * PrefsManager alone — kept minimal since a prior bigger-widget variant that queried the DB
- * unconditionally was suspected (wrongly, in hindsight — the delay persisted even after removing
- * it) of causing a ~1 minute lag before the widget visually reflected a toggle.
+ * Uses the default SizeMode.Single. Always reads today's cumulative total via
+ * WorkRepository.getTodayMinutes() — the same single source of truth the app screen uses (see
+ * technical lesson #96/#97) — rather than the current session's own elapsed time alone, which
+ * used to make "do końca" wildly overstate remaining time after a break (ignoring sessions
+ * already closed today). A prior bigger-widget variant that queried the DB unconditionally was
+ * suspected (wrongly, in hindsight — a reported lag persisted even after removing it) of causing
+ * a ~1 minute lag before the widget visually reflected a toggle, but a plain DB read here is not
+ * that variant and is required for correctness.
  */
 class WorkTimerGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = PrefsManager(context)
-        val todayMinutes = if (!prefs.isWorking) {
-            val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-            val today = LocalDate.now().format(fmt)
-            val sessions = WorkDatabase.getDatabase(context).workDao().getSessionsForDateOnce(today)
-            getDayMinutes(today, sessions)
-        } else 0
+        val repo = WorkRepository(WorkDatabase.getDatabase(context).workDao())
+        val todayMinutes = repo.getTodayMinutes()
         provideContent { WidgetContent(prefs, todayMinutes) }
     }
 }
@@ -46,19 +43,17 @@ class WorkTimerGlanceWidget : GlanceAppWidget() {
 @Composable
 private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
     val isWorking = prefs.isWorking
-    val startTime = prefs.currentSessionStart
-    val targetMs = prefs.targetWorkMinutes * 60_000L
-    val elapsedMs = if (isWorking && startTime > 0) System.currentTimeMillis() - startTime else 0L
-    val remainingMs = targetMs - elapsedMs
-    val isOvertime = isWorking && remainingMs <= 0
+    val targetMinutes = prefs.targetWorkMinutes
+    val remainingMs = (targetMinutes - todayMinutes).coerceAtLeast(0) * 60_000L
+    val overtimeMs = (todayMinutes - targetMinutes).coerceAtLeast(0) * 60_000L
+    val isOvertime = isWorking && todayMinutes >= targetMinutes
 
-    val elapsedMinutes = (elapsedMs / 60_000).toInt()
     val bgColor = when {
         !isWorking -> Color(0xFF263238) // gray — stopped, no color-coded urgency
-        elapsedMinutes >= prefs.redThresholdMinutes -> Color(0xFFC62828) // red — past configured threshold
-        elapsedMinutes >= prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) // orange — past configured threshold
-        elapsedMinutes >= prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — past configured threshold
-        elapsedMinutes >= prefs.blueThresholdMinutes -> Color(0xFF1565C0) // blue — configured halfway-ish threshold
+        todayMinutes >= prefs.redThresholdMinutes -> Color(0xFFC62828) // red — past configured threshold
+        todayMinutes >= prefs.orangeThresholdMinutes -> Color(0xFFEF6C00) // orange — past configured threshold
+        todayMinutes >= prefs.yellowThresholdMinutes -> Color(0xFFF9A825) // yellow — past configured threshold
+        todayMinutes >= prefs.blueThresholdMinutes -> Color(0xFF1565C0) // blue — configured halfway-ish threshold
         else -> Color(0xFF1B5E20) // green — normal
     }
 
@@ -72,7 +67,7 @@ private fun WidgetContent(prefs: PrefsManager, todayMinutes: Int) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (isWorking) {
                 Text(
-                    text = if (isOvertime) "+${formatRemaining(-remainingMs)}" else formatRemaining(remainingMs),
+                    text = if (isOvertime) "+${formatRemaining(overtimeMs)}" else formatRemaining(remainingMs),
                     style = TextStyle(
                         color = if (isOvertime) ColorProvider(Color(0xFFFFB74D)) else ColorProvider(Color.White),
                         fontSize = 13.sp,

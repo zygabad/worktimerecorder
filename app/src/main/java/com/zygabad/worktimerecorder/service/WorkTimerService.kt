@@ -43,10 +43,9 @@ class WorkTimerService : Service() {
                     return@launch
                 }
 
-                val start = prefs.currentSessionStart
                 val target = prefs.targetWorkMinutes
-                val elapsed = if (start > 0) ((System.currentTimeMillis() - start) / 60_000).toInt() else 0
-                val remaining = (target - elapsed).coerceAtLeast(0)
+                val todayMinutes = repo.getTodayMinutes()
+                val remaining = (target - todayMinutes).coerceAtLeast(0)
                 val h = remaining / 60; val m = remaining % 60
                 val text = if (remaining > 0) "Pozostało: ${h}h ${m.toString().padStart(2, '0')}m"
                            else "Cel osiągnięty! 🎉"

@@ -208,4 +208,27 @@ class WorkRepositoryTest {
     }
 
     private fun today(): String = LocalDate.now().toString()
+
+    // --- Bug #97: notification + widget "Pozostało" only counted the currently open session's
+    // own elapsed time, ignoring earlier sessions closed the same day after a break — so after a
+    // break, they showed far more time remaining than the app screen (which already summed the
+    // whole day correctly, see technical lesson #96). getTodayMinutes is the one place both the
+    // service and the widget should now read from. ---
+
+    @Test
+    fun `getTodayMinutes sums an earlier closed session plus the still-open one`() = runTest {
+        val now = System.currentTimeMillis()
+        dao.insert(WorkSession(date = today(), startTime = now - 180 * 60_000, endTime = now - 158 * 60_000, durationMinutes = 22))
+        dao.insert(WorkSession(date = today(), startTime = now - 30 * 60_000)) // still open, running 30 min
+
+        assertEquals(22 + 30, repo.getTodayMinutes(now))
+    }
+
+    @Test
+    fun `getTodayMinutes is just the closed total when nothing is currently open`() = runTest {
+        val now = System.currentTimeMillis()
+        dao.insert(WorkSession(date = today(), startTime = now - 180 * 60_000, endTime = now - 158 * 60_000, durationMinutes = 22))
+
+        assertEquals(22, repo.getTodayMinutes(now))
+    }
 }

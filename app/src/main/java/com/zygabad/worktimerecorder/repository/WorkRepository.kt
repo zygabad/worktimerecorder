@@ -33,6 +33,22 @@ class WorkRepository(private val dao: WorkDao) {
     fun observeOpenSession(): Flow<WorkSession?> = dao.observeOpenSession()
 
     /**
+     * Single source of truth for "today's total elapsed minutes so far", for callers that only
+     * need a one-shot snapshot (the widget, the foreground-service notification) rather than a
+     * live Flow (MainViewModel has its own reactive path). Bug #97: the widget and notification
+     * used to compute remaining time from only the currently open session's own elapsed time,
+     * ignoring earlier sessions already closed today — showing far more time "left" than the app
+     * screen did after a break. getDayMinutes already sums closed sessions' durationMinutes and
+     * live-recomputes the still-open one, which is exactly the same cumulative total the app
+     * screen uses (technical lesson #96).
+     */
+    suspend fun getTodayMinutes(nowMillis: Long = System.currentTimeMillis()): Int {
+        val today = LocalDate.now().format(fmt)
+        val sessions = dao.getSessionsForDateOnce(today)
+        return com.zygabad.worktimerecorder.util.getDayMinutes(today, sessions, nowMillis)
+    }
+
+    /**
      * Single source of truth for starting/stopping work: always checks the DB for an
      * already-open session instead of trusting SharedPreferences, so the widget action
      * and the in-app button can never diverge into two simultaneously "open" sessions.
