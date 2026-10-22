@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.zygabad.worktimerecorder.WorkTimerApplication
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkSession
+import com.zygabad.worktimerecorder.repository.DayLocationRepository
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
 import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
@@ -28,11 +29,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
+
+private val isoDateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as WorkTimerApplication).database
     private val repo = WorkRepository(db.workDao())
+    private val dayLocationRepo = DayLocationRepository(db.dayLocationDao())
     val prefs = PrefsManager(app)
 
     /**
@@ -73,6 +78,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.getMonthSessions(it)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Remote/Office/Holiday tag for today, for the "Dziś" card's badge. */
+    val todayLocation: StateFlow<String?> = dayLocationRepo.observeLocation(LocalDate.now().format(isoDateFmt))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val weekDayLocations: StateFlow<Map<String, String>> = _weekStart.flatMapLatest { start ->
+        dayLocationRepo.observeLocationsMap(start.format(isoDateFmt), start.plusDays(6).format(isoDateFmt))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    val monthDayLocations: StateFlow<Map<String, String>> = _monthStart.flatMapLatest { start ->
+        dayLocationRepo.observeLocationsMap(start.format(isoDateFmt), start.plusMonths(1).minusDays(1).format(isoDateFmt))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** True right after starting a session for a day that has no Remote/Office tag yet — MainScreen
+     * shows a one-time "Zdalnie czy Biuro?" prompt and clears this via dismissLocationPrompt(). */
+    val pendingLocationPrompt = MutableStateFlow(false)
+
+    fun setDayLocation(date: String, type: String) {
+        viewModelScope.launch { withContext(Dispatchers.IO) { dayLocationRepo.setLocation(date, type) } }
+    }
+
+    fun dismissLocationPrompt() { pendingLocationPrompt.value = false }
+
     init {
         viewModelScope.launch {
             while (true) {
@@ -93,6 +120,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val app = getApplication<Application>()
             if (prefs.isWorking) {
                 app.startService(Intent(app, WorkTimerService::class.java))
+                val today = LocalDate.now().format(isoDateFmt)
+                if (withContext(Dispatchers.IO) { dayLocationRepo.getLocation(today) } == null) {
+                    pendingLocationPrompt.value = true
+                }
             } else {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }

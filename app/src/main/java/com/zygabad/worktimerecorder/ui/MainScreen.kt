@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.zygabad.worktimerecorder.data.DayLocationType
 import com.zygabad.worktimerecorder.data.WorkSession
 import java.time.Instant
 import java.time.LocalDate
@@ -39,6 +40,56 @@ private fun formatClock(epochMs: Long): String =
     Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(timeFmt)
 
 private data class EditingTime(val session: WorkSession, val isStart: Boolean)
+
+/** Small tappable "R"/"O"/"H" tag — opens DayLocationPicker to set/change that date's location. */
+@Composable
+fun DayLocationBadge(type: String?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val (bg, fg) = when (type) {
+        DayLocationType.REMOTE -> Color(0xFF1565C0) to Color.White
+        DayLocationType.OFFICE -> Color(0xFF6A1B9A) to Color.White
+        DayLocationType.HOLIDAY -> Color(0xFF2E7D32) to Color.White
+        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(onClick = onClick, shape = RoundedCornerShape(6.dp), color = bg, modifier = modifier) {
+        Text(
+            text = type ?: "?",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = fg,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+fun DayLocationPickerDialog(
+    showHoliday: Boolean = true,
+    title: String = "Gdzie dzisiaj pracujesz?",
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                TextButton(onClick = { onPick(DayLocationType.REMOTE) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("🏠  Zdalnie (R)", modifier = Modifier.fillMaxWidth())
+                }
+                TextButton(onClick = { onPick(DayLocationType.OFFICE) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("🏢  Biuro (O)", modifier = Modifier.fillMaxWidth())
+                }
+                if (showHoliday) {
+                    TextButton(onClick = { onPick(DayLocationType.HOLIDAY) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("🌴  Urlop (H)", modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } }
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +116,11 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
     val weekStart by vm.weekStart.collectAsState()
     val monthSessions by vm.monthSessions.collectAsState()
     val monthStart by vm.monthStart.collectAsState()
+    val todayLocation by vm.todayLocation.collectAsState()
+    val weekDayLocations by vm.weekDayLocations.collectAsState()
+    val monthDayLocations by vm.monthDayLocations.collectAsState()
+    val pendingLocationPrompt by vm.pendingLocationPrompt.collectAsState()
+    var pickingLocationFor by remember { mutableStateOf<String?>(null) }
     val todayMinutes = vm.getTodayTotalMinutes(todaySessions, isWorking, elapsed)
     val todaySeconds = vm.getTodayTotalSeconds(todaySessions, isWorking, elapsed)
     val targetMinutes = vm.prefs.targetWorkMinutes
@@ -214,7 +270,13 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Dziś", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Dziś", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            DayLocationBadge(todayLocation, onClick = {
+                                pickingLocationFor = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                            })
+                        }
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
@@ -268,7 +330,9 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         }
                         if (expanded) {
                             Spacer(Modifier.height(8.dp))
-                            WeekSessionsTable(weekStart, weekSessions, vm)
+                            WeekSessionsTable(weekStart, weekSessions, weekDayLocations, vm) { date ->
+                                pickingLocationFor = date
+                            }
                         }
                     }
                 }
@@ -314,12 +378,31 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                         }
                         if (expanded) {
                             Spacer(Modifier.height(8.dp))
-                            MonthlyTable(monthStart, monthSessions, vm)
+                            MonthlyTable(monthStart, monthSessions, monthDayLocations, vm) { date ->
+                                pickingLocationFor = date
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (pendingLocationPrompt) {
+        val today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        DayLocationPickerDialog(
+            showHoliday = false,
+            onPick = { type -> vm.setDayLocation(today, type); vm.dismissLocationPrompt() },
+            onDismiss = { vm.dismissLocationPrompt() }
+        )
+    }
+
+    pickingLocationFor?.let { date ->
+        DayLocationPickerDialog(
+            title = "Oznacz $date jako:",
+            onPick = { type -> vm.setDayLocation(date, type); pickingLocationFor = null },
+            onDismiss = { pickingLocationFor = null }
+        )
     }
 }
 
@@ -337,7 +420,13 @@ private fun buildMonthCsv(monthStart: LocalDate, sessions: List<WorkSession>, vm
 }
 
 @Composable
-fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainViewModel) {
+fun MonthlyTable(
+    monthStart: LocalDate,
+    sessions: List<WorkSession>,
+    dayLocations: Map<String, String>,
+    vm: MainViewModel,
+    onBadgeClick: (String) -> Unit
+) {
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val dayNames = listOf("Pon", "Wto", "Śro", "Czw", "Pią", "Sob", "Nie")
     val today = LocalDate.now()
@@ -360,10 +449,12 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
                 modifier = Modifier.weight(1f))
             Text("Suma", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(32.dp))
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         rows.forEachIndexed { index, (date, minutes) ->
             val isToday = date == today
+            val dateStr = date.format(fmt)
             Row(
                 Modifier.fillMaxWidth()
                     .background(if (index % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.Transparent)
@@ -391,6 +482,7 @@ fun MonthlyTable(monthStart: LocalDate, sessions: List<WorkSession>, vm: MainVie
                     fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.weight(1f)
                 )
+                DayLocationBadge(dayLocations[dateStr], onClick = { onBadgeClick(dateStr) }, modifier = Modifier.width(32.dp))
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -481,7 +573,13 @@ fun DeleteSessionDialog(session: WorkSession, onConfirm: () -> Unit, onDismiss: 
 }
 
 @Composable
-fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: MainViewModel) {
+fun WeekSessionsTable(
+    weekStart: LocalDate,
+    sessions: List<WorkSession>,
+    dayLocations: Map<String, String>,
+    vm: MainViewModel,
+    onBadgeClick: (String) -> Unit
+) {
     val dayNames = listOf("Pon", "Wto", "Śro", "Czw", "Pią", "Sob", "Nie")
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val dateFmt = DateTimeFormatter.ofPattern("dd.MM")
@@ -504,13 +602,21 @@ fun WeekSessionsTable(weekStart: LocalDate, sessions: List<WorkSession>, vm: Mai
             val stripe = if (renderedDayIndex % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.Transparent
             renderedDayIndex++
 
-            Row(Modifier.fillMaxWidth().background(stripe).padding(top = 4.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                )
+            Row(
+                Modifier.fillMaxWidth().background(stripe).padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${dayNames[date.dayOfWeek.value - 1]} ${date.format(dateFmt)}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    DayLocationBadge(dayLocations[date.format(fmt)], onClick = { onBadgeClick(date.format(fmt)) })
+                }
                 Text(vm.formatMinutes(dayTotal), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             daySessions.forEach { session ->
