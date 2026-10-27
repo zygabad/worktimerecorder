@@ -93,13 +93,25 @@ fun DayLocationPickerDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditTimeDialog(initialEpochMs: Long?, onConfirm: (hour: Int, minute: Int) -> Unit, onDismiss: () -> Unit) {
+fun EditTimeDialog(
+    initialEpochMs: Long?,
+    title: String = "Wybierz godzinę",
+    defaultHour: Int? = null,
+    defaultMinute: Int? = null,
+    onConfirm: (hour: Int, minute: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
     val zone = ZoneId.systemDefault()
-    val initial = initialEpochMs?.let { Instant.ofEpochMilli(it).atZone(zone) } ?: java.time.ZonedDateTime.now(zone)
-    val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
+    val initial = initialEpochMs?.let { Instant.ofEpochMilli(it).atZone(zone) }
+    val now = java.time.ZonedDateTime.now(zone)
+    val state = rememberTimePickerState(
+        initialHour = initial?.hour ?: defaultHour ?: now.hour,
+        initialMinute = initial?.minute ?: defaultMinute ?: now.minute,
+        is24Hour = true
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Wybierz godzinę") },
+        title = { Text(title) },
         text = { TimePicker(state = state) },
         confirmButton = { TextButton(onClick = { onConfirm(state.hour, state.minute) }) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } }
@@ -588,6 +600,12 @@ fun WeekSessionsTable(
     var weekTotal = 0
     var pendingDelete by remember { mutableStateOf<WorkSession?>(null) }
     var editingTime by remember { mutableStateOf<EditingTime?>(null) }
+    // Two-step add-entry flow: tapping "+" after a day picks a start time, then an end time, then
+    // inserts a manual session for that date — covers days with zero sessions too (e.g. a wrong
+    // entry was deleted and there was otherwise no way to add anything back for that day).
+    var addingSessionForDate by remember { mutableStateOf<String?>(null) }
+    var addSessionStep by remember { mutableStateOf(0) }
+    var pendingSessionStart by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     Column {
         var renderedDayIndex = 0
@@ -595,7 +613,6 @@ fun WeekSessionsTable(
             val date = weekStart.plusDays(i.toLong())
             if (date.isAfter(today)) return@forEach
             val daySessions = byDate[date.format(fmt)]?.sortedBy { it.startTime } ?: emptyList()
-            if (daySessions.isEmpty()) return@forEach
 
             val dayTotal = daySessions.sumOf { vm.sessionMinutes(it) }
             weekTotal += dayTotal
@@ -616,8 +633,20 @@ fun WeekSessionsTable(
                     )
                     Spacer(Modifier.width(6.dp))
                     DayLocationBadge(dayLocations[date.format(fmt)], onClick = { onBadgeClick(date.format(fmt)) })
+                    Spacer(Modifier.width(2.dp))
+                    IconButton(
+                        onClick = {
+                            addingSessionForDate = date.format(fmt)
+                            addSessionStep = 0
+                            pendingSessionStart = null
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Dodaj wpis", modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
-                Text(vm.formatMinutes(dayTotal), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(if (dayTotal > 0) vm.formatMinutes(dayTotal) else "—", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             daySessions.forEach { session ->
                 Row(Modifier.fillMaxWidth().background(stripe).padding(vertical = 0.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -657,5 +686,29 @@ fun WeekSessionsTable(
             },
             onDismiss = { editingTime = null }
         )
+    }
+    addingSessionForDate?.let { date ->
+        fun closeAddFlow() { addingSessionForDate = null; addSessionStep = 0; pendingSessionStart = null }
+        if (addSessionStep == 0) {
+            EditTimeDialog(
+                initialEpochMs = null,
+                title = "Początek pracy ($date)",
+                defaultHour = 8, defaultMinute = 0,
+                onConfirm = { h, m -> pendingSessionStart = h to m; addSessionStep = 1 },
+                onDismiss = { closeAddFlow() }
+            )
+        } else {
+            EditTimeDialog(
+                initialEpochMs = null,
+                title = "Koniec pracy ($date)",
+                defaultHour = 16, defaultMinute = 30,
+                onConfirm = { h, m ->
+                    val (sh, sm) = pendingSessionStart!!
+                    vm.addManualSession(date, sh, sm, h, m)
+                    closeAddFlow()
+                },
+                onDismiss = { closeAddFlow() }
+            )
+        }
     }
 }

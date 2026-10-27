@@ -131,6 +131,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Back-fills a session for a day/time the user never toggled live — see WorkRepository.addManualSession. */
+    fun addManualSession(date: String, startHour: Int, startMinute: Int, endHour: Int, endMinute: Int) {
+        viewModelScope.launch {
+            val start = combineDateTime(date, startHour, startMinute)
+            val end = combineDateTime(date, endHour, endMinute)
+            withContext(Dispatchers.IO) { repo.addManualSession(date, start, end) }
+            WorkTimerGlanceWidget().updateAll(getApplication<Application>())
+        }
+    }
+
     fun deleteSession(session: WorkSession) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { repo.deleteSession(session) }

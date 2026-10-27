@@ -77,6 +77,18 @@ class WorkRepository(private val dao: WorkDao) {
 
     suspend fun deleteSession(session: WorkSession) = dao.delete(session)
 
+    /**
+     * Manual back-fill for a session the user forgot to log live, or typo'd and wants to
+     * supplement rather than edit — reported as "no way to add anything for yesterday" once a
+     * wrong entry for that day was deleted (the day then had zero sessions, and nothing in the
+     * UI let them add a fresh one). Unlike toggleWork, both ends are known up front, so the row
+     * is inserted already closed.
+     */
+    suspend fun addManualSession(date: String, start: Long, end: Long) {
+        val duration = ((end - start) / 60_000).toInt().coerceAtLeast(0)
+        dao.insert(WorkSession(date = date, startTime = start, endTime = end, durationMinutes = duration))
+    }
+
     suspend fun updateSessionTimes(session: WorkSession, newStart: Long, newEnd: Long?) {
         val duration = newEnd?.let { ((it - newStart) / 60_000).toInt().coerceAtLeast(0) } ?: 0
         dao.update(session.copy(startTime = newStart, endTime = newEnd, durationMinutes = duration))

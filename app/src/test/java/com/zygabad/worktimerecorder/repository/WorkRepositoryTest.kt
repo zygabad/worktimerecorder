@@ -3,6 +3,7 @@ package com.zygabad.worktimerecorder.repository
 import com.zygabad.worktimerecorder.data.WorkSession
 import com.zygabad.worktimerecorder.testutil.FakeWorkDao
 import com.zygabad.worktimerecorder.testutil.testPrefsManager
+import com.zygabad.worktimerecorder.util.combineDateTime
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -230,5 +231,32 @@ class WorkRepositoryTest {
         dao.insert(WorkSession(date = today(), startTime = now - 180 * 60_000, endTime = now - 158 * 60_000, durationMinutes = 22))
 
         assertEquals(22, repo.getTodayMinutes(now))
+    }
+
+    // --- addManualSession: back-filling a day the user forgot to log live, or typo'd and wants
+    // to supplement rather than edit (reported: "no way to add anything for yesterday") ---
+
+    @Test
+    fun `addManualSession inserts an already-closed session with the given start and end`() = runTest {
+        val start = combineDateTime("2026-10-22", 8, 0)
+        val end = combineDateTime("2026-10-22", 16, 30)
+
+        repo.addManualSession("2026-10-22", start, end)
+
+        val session = dao.sessions.single()
+        assertEquals("2026-10-22", session.date)
+        assertEquals(start, session.startTime)
+        assertEquals(end, session.endTime)
+        assertEquals(510, session.durationMinutes)
+    }
+
+    @Test
+    fun `addManualSession coerces an end before start to zero duration instead of negative`() = runTest {
+        val start = combineDateTime("2026-10-22", 16, 0)
+        val end = combineDateTime("2026-10-22", 8, 0)
+
+        repo.addManualSession("2026-10-22", start, end)
+
+        assertEquals(0, dao.sessions.single().durationMinutes)
     }
 }
