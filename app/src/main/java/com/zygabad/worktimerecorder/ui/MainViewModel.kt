@@ -90,8 +90,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         dayLocationRepo.observeLocationsMap(start.format(isoDateFmt), start.plusMonths(1).minusDays(1).format(isoDateFmt))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /** True right after starting a session for a day that has no Remote/Office tag yet — MainScreen
-     * shows a one-time "Zdalnie czy Biuro?" prompt and clears this via dismissLocationPrompt(). */
+    /** True while a session is open for a day that has no Remote/Office tag yet — MainScreen shows
+     * a one-time "Zdalnie czy Biuro?" prompt and clears this via dismissLocationPrompt(). Derived
+     * reactively (not just set inside toggleWork()) because the widget's double-tap starts work
+     * straight against the DB, bypassing this ViewModel entirely — a flag only toggleWork() could
+     * set would never fire for a day started from the widget. Driving it off isWorking/todayLocation
+     * means it's re-evaluated whenever either one changes for ANY reason, including an external DB
+     * write, so it still shows up the moment the app is next opened. */
     val pendingLocationPrompt = MutableStateFlow(false)
 
     fun setDayLocation(date: String, type: String) {
@@ -107,6 +112,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(1_000)
             }
         }
+        viewModelScope.launch {
+            isWorking.combine(todayLocation) { working, location -> working && location == null }
+                .distinctUntilChanged()
+                .collect { shouldPrompt -> if (shouldPrompt) pendingLocationPrompt.value = true }
+        }
     }
 
     private fun calcElapsed(): Long {
@@ -120,10 +130,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val app = getApplication<Application>()
             if (prefs.isWorking) {
                 app.startService(Intent(app, WorkTimerService::class.java))
-                val today = LocalDate.now().format(isoDateFmt)
-                if (withContext(Dispatchers.IO) { dayLocationRepo.getLocation(today) } == null) {
-                    pendingLocationPrompt.value = true
-                }
             } else {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
