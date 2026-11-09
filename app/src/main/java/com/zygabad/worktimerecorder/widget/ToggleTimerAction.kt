@@ -8,6 +8,7 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.updateAll
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
+import com.zygabad.worktimerecorder.garmin.GarminBridge
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
 import kotlinx.coroutines.CoroutineScope
@@ -86,6 +87,12 @@ class ToggleTimerAction : ActionCallback {
             } catch (_: Exception) {}
 
             WorkTimerGlanceWidget().updateAll(context)
+
+            // The watch face needs the new state too, and the widget is the usual way work
+            // gets started/stopped — wiring only the in-app button would leave the watch stale
+            // for the common case. GarminBridge coalesces this with the push the foreground
+            // service makes a moment later, so only the final state goes out.
+            GarminBridge.pushCurrentState(context)
 
             // Belt-and-suspenders: re-push shortly after in case the widget host coalesces/drops
             // an update that lands in the same instant as the foreground-service transition above.

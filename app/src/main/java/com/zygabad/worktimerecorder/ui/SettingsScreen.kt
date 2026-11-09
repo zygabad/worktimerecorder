@@ -110,12 +110,18 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = currentTarget == 480,
-                    onClick = { hours = "8"; minutes = "0"; vm.prefs.targetWorkMinutes = 480; saved = true },
+                    onClick = {
+                        hours = "8"; minutes = "0"; vm.prefs.targetWorkMinutes = 480; saved = true
+                        vm.pushStateToWatch()
+                    },
                     label = { Text("8h") }
                 )
                 FilterChip(
                     selected = currentTarget == 510,
-                    onClick = { hours = "8"; minutes = "30"; vm.prefs.targetWorkMinutes = 510; saved = true },
+                    onClick = {
+                        hours = "8"; minutes = "30"; vm.prefs.targetWorkMinutes = 510; saved = true
+                        vm.pushStateToWatch()
+                    },
                     label = { Text("8h 30m") }
                 )
             }
@@ -148,6 +154,9 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                     val m = minutes.toIntOrNull() ?: 30
                     vm.prefs.targetWorkMinutes = h * 60 + m
                     saved = true
+                    // Every target change has to reach the watch face: its whole display is
+                    // derived from the target (finish clock, remaining, overtime).
+                    vm.pushStateToWatch()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Zapisz") }

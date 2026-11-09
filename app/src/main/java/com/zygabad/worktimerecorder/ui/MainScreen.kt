@@ -30,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.zygabad.worktimerecorder.data.DayLocationType
 import com.zygabad.worktimerecorder.data.WorkSession
+import com.zygabad.worktimerecorder.util.formatFinishClock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -219,8 +220,10 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                             )
                             Spacer(Modifier.height(12.dp))
                             val nowMs = System.currentTimeMillis()
+                            // Shared with the Garmin payload so the pill and the watch face can
+                            // never disagree about the same finish time (see GarminPayload.kt).
                             fun finishClock(targetMin: Int): String =
-                                formatClock(nowMs + (targetMin - todayMinutes).coerceAtLeast(0) * 60_000L)
+                                formatFinishClock(todayMinutes, targetMin, nowMs)
                             fun presetLabel(min: Int): String {
                                 val h = min / 60; val m = min % 60
                                 return if (m == 0) "${h}h" else "${h}h${m}m"
@@ -232,7 +235,12 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                 vm.prefs.quickPresetsMinutes.forEach { presetMin ->
                                     val selected = targetMinutes == presetMin
                                     Surface(
-                                        onClick = { vm.prefs.targetWorkMinutes = presetMin },
+                                        onClick = {
+                                            vm.prefs.targetWorkMinutes = presetMin
+                                            // A new target moves the finish time, which is the
+                                            // single number the watch face exists to show.
+                                            vm.pushStateToWatch()
+                                        },
                                         shape = RoundedCornerShape(16.dp),
                                         color = if (selected) statusContent.copy(alpha = 0.2f) else Color.Transparent,
                                         border = BorderStroke(1.dp, statusContentMuted)

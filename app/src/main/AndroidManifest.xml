@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Android 11+ package visibility: without this declaration the Connect IQ SDK cannot even
+        see whether Garmin Connect Mobile is installed, and every initialize() would report
+        GCM_NOT_INSTALLED on a phone that has it. (The ciq-companion-app-sdk AAR declares the same
+        <queries> entry in its own manifest, so this is belt-and-suspenders — kept explicit so the
+        requirement is visible here and survives a future SDK version dropping it.)
+    -->
+    <queries>
+        <package android:name="com.garmin.android.apps.connectmobile" />
+    </queries>
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

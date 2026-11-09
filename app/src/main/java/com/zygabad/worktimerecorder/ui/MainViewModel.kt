@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.zygabad.worktimerecorder.WorkTimerApplication
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkSession
+import com.zygabad.worktimerecorder.garmin.GarminBridge
 import com.zygabad.worktimerecorder.repository.DayLocationRepository
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
@@ -134,6 +135,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
             WorkTimerGlanceWidget().updateAll(app)
+            pushStateToWatch()
         }
     }
 
@@ -144,6 +146,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val end = combineDateTime(date, endHour, endMinute)
             withContext(Dispatchers.IO) { repo.addManualSession(date, start, end) }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
+            // Pushed unconditionally: a back-fill for an earlier day leaves today's total (and
+            // therefore the payload) unchanged, so there is nothing to gain from deciding here
+            // whether the edited date was today — the push rebuilds the snapshot from the DB.
+            pushStateToWatch()
         }
     }
 
@@ -155,6 +161,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
                 WorkTimerGlanceWidget().updateAll(app)
             }
+            pushStateToWatch()
         }
     }
 
@@ -163,6 +170,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val newStart = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, newStart, session.endTime) }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
+            pushStateToWatch()
         }
     }
 
@@ -175,8 +183,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
+            pushStateToWatch()
         }
     }
+
+    /**
+     * Mirrors the current state onto the Garmin watch face. Called from every path that can change
+     * what the watch should show — start/stop, a target change (the quick-preset pills write
+     * prefs.targetWorkMinutes straight from MainScreen, and SettingsScreen does the same), session
+     * edits/deletes and manual back-fills — because the watch has no way to pull state for itself:
+     * if the phone doesn't push after a change, the watch keeps showing the old finish time.
+     * Entirely best-effort; see GarminBridge.
+     */
+    fun pushStateToWatch() = GarminBridge.pushCurrentState(getApplication<Application>())
 
     fun previousWeek() { _weekStart.value = _weekStart.value.minusWeeks(1) }
 

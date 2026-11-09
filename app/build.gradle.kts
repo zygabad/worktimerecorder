@@ -12,8 +12,8 @@ android {
         applicationId = "com.zygabad.worktimerecorder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "1.22"
+        versionCode = 24
+        versionName = "1.23"
     }
 
     signingConfigs {
@@ -62,6 +62,12 @@ dependencies {
     // Glance widget
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.glance:glance-material3:1.1.1")
+    // Garmin Connect IQ companion SDK — pushes the work-timer state to the "Pro Stat" watch face.
+    // Published on Maven Central (settings.gradle.kts already declares mavenCentral()); the "@aar"
+    // suffix is what Garmin's own Mobile SDK for Android doc prescribes. All traffic goes through
+    // the Garmin Connect Mobile app, so this dependency alone does nothing if it isn't installed —
+    // GarminBridge treats that as a normal, silent no-op.
+    implementation("com.garmin.connectiq:ciq-companion-app-sdk:2.4.0@aar")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

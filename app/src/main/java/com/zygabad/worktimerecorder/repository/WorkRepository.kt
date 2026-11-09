@@ -33,6 +33,14 @@ class WorkRepository(private val dao: WorkDao) {
     fun observeOpenSession(): Flow<WorkSession?> = dao.observeOpenSession()
 
     /**
+     * One-shot "is work in progress right now", for callers outside a Flow-collecting scope (the
+     * Garmin push, which has to build a payload and hand it to the SDK in one pass). Asks the DB
+     * rather than prefs.isWorking for the same reason observeOpenSession() exists: prefs can lag
+     * behind a session the widget opened/closed from outside this process's own code path.
+     */
+    suspend fun isWorkInProgress(): Boolean = dao.getOpenSession() != null
+
+    /**
      * Single source of truth for "today's total elapsed minutes so far", for callers that only
      * need a one-shot snapshot (the widget, the foreground-service notification) rather than a
      * live Flow (MainViewModel has its own reactive path). Bug #97: the widget and notification
