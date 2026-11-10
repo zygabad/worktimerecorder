@@ -27,6 +27,17 @@ class PrefsManager(context: Context) {
         get() = prefs.getLong("last_widget_tap_time", -1L)
         set(value) = prefs.edit { putLong("last_widget_tap_time", value) }
 
+    /**
+     * Outcome of the LAST push to the Garmin watch face, already formatted for display
+     * ("HH:mm — ..."; see util/WatchPushStatus.kt). Persisted rather than kept in memory because
+     * the push that produced it normally runs from the foreground service and the line is read
+     * much later in Ustawienia, possibly after the process was killed and recreated. Empty string
+     * means "no attempt recorded yet" — the UI shows "jeszcze nie probowano" for that.
+     */
+    var lastWatchPushStatus: String
+        get() = prefs.getString("last_watch_push_status", "") ?: ""
+        set(value) = prefs.edit { putString("last_watch_push_status", value) }
+
     // Widget background color thresholds, all in minutes.
     // No stored value yet -> defaults to half of whatever the target currently is.
     var blueThresholdMinutes: Int

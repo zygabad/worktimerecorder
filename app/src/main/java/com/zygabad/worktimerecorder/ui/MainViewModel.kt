@@ -197,6 +197,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun pushStateToWatch() = GarminBridge.pushCurrentState(getApplication<Application>())
 
+    /**
+     * Outcome of the last push attempt, as one ready-to-read Polish line (util/WatchPushStatus.kt),
+     * or null when nothing has been attempted yet. Backed by GarminBridge's own StateFlow rather
+     * than read once from prefs, so Ustawienia → Zegarek updates while the screen stays open —
+     * which is the entire point: tap "Wyslij do zegarka teraz", wait, read what happened.
+     */
+    val lastWatchPushStatus: StateFlow<String?> = GarminBridge.observeLastPushStatus(app)
+
+    /**
+     * The manual "send now" from Ustawienia. Flagged as manual so GarminBridge also clears its
+     * "Garmin Connect is unavailable" latch — otherwise the button could only ever replay a
+     * verdict the process reached hours earlier.
+     */
+    fun pushStateToWatchNow() = GarminBridge.pushCurrentState(getApplication<Application>(), manual = true)
+
     fun previousWeek() { _weekStart.value = _weekStart.value.minusWeeks(1) }
 
     fun nextWeek() { _weekStart.value = computeNextWeekStart(_weekStart.value) }

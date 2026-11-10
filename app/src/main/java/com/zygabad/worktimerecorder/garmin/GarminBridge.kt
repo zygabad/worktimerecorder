@@ -8,13 +8,18 @@ import com.garmin.android.connectiq.IQDevice
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.repository.WorkRepository
+import com.zygabad.worktimerecorder.util.WatchPushOutcome
 import com.zygabad.worktimerecorder.util.buildWatchPayload
+import com.zygabad.worktimerecorder.util.formatWatchPushStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -45,9 +50,16 @@ import kotlin.coroutines.resume
  *    refresh); only the LAST state is worth sending, and the SDK round-trip is slow enough that
  *    firing all of them would queue redundant BLE traffic.
  *
- * 4. The payload goes to EVERY known device that is CONNECTED and reports the watch face as
- *    INSTALLED, instead of guessing "the first device". Guessing silently loses the feature for
- *    anyone with more than one Garmin paired (an old watch still in Garmin Connect, say).
+ * 4. The payload goes to EVERY known device that is CONNECTED, instead of guessing "the first
+ *    device". Guessing silently loses the feature for anyone with more than one Garmin paired (an
+ *    old watch still in Garmin Connect, say).
+ *
+ * 5. Best-effort does NOT mean undiagnosable. Constraint 1 used to be implemented as "log it and
+ *    return", which made the bridge completely invisible when it failed: a blank watch face at
+ *    work, with no PC and no adb, looked exactly the same for all eight ways a push can die. So
+ *    every exit path now also records a one-line Polish outcome (util/WatchPushStatus.kt) into
+ *    PrefsManager, where Ustawienia → Zegarek shows it and the manual "Wyslij do zegarka teraz"
+ *    button can refresh it. Recording is itself best-effort and never throws into the caller.
  */
 object GarminBridge {
 
@@ -88,13 +100,70 @@ object GarminBridge {
      */
     private var sdkUnavailable = false
 
+    /** Reason behind [sdkUnavailable], kept so a latched verdict can still name itself. */
+    private var lastInitError: String? = null
+
+    /**
+     * Set by a manual push from Ustawienia. The [sdkUnavailable] latch above is right for the
+     * automatic pushes it was written for, but it would turn the diagnostic button into a replay
+     * of a verdict reached hours ago — so an explicit human request is allowed to clear it and
+     * make the SDK answer for itself again. Volatile because it is written from the UI thread and
+     * read by the pump coroutine.
+     */
+    @Volatile
+    private var forceInitRetry = false
+
+    /**
+     * In-process mirror of PrefsManager.lastWatchPushStatus so Ustawienia can recompose the moment
+     * an outcome is recorded — SharedPreferences has no Flow of its own, and every push in this
+     * app happens in this same process (the foreground service declares no android:process), so
+     * one StateFlow is enough. Prefs remains the durable copy for when the process WAS killed:
+     * [observeLastPushStatus] seeds the flow from it on first use.
+     */
+    private val _lastPushStatus = MutableStateFlow<String?>(null)
+
+    /**
+     * Live view of the last push outcome, already formatted for display; null until something has
+     * been recorded (the UI renders "jeszcze nie probowano" for that).
+     */
+    fun observeLastPushStatus(context: Context): StateFlow<String?> {
+        if (_lastPushStatus.value == null) {
+            _lastPushStatus.value = try {
+                PrefsManager(context.applicationContext).lastWatchPushStatus.takeIf { it.isNotBlank() }
+            } catch (t: Throwable) {
+                null
+            }
+        }
+        return _lastPushStatus.asStateFlow()
+    }
+
+    /**
+     * Persists + publishes one push outcome. Wrapped in its own catch: a diagnostic is worth
+     * strictly less than the timer, so a failing SharedPreferences write must not take down the
+     * push (or the pump) with it.
+     */
+    private fun record(appContext: Context, outcome: WatchPushOutcome) {
+        try {
+            val line = formatWatchPushStatus(outcome, System.currentTimeMillis())
+            PrefsManager(appContext).lastWatchPushStatus = line
+            _lastPushStatus.value = line
+            Log.i(TAG, line)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not record the watch diagnostic", t)
+        }
+    }
+
     /**
      * The one entry point the rest of the app uses: reads the current state and pushes it.
      * Fire-and-forget by design — callers (ViewModel, Service, widget action) must not have to
      * care how long the watch takes or whether it answered at all.
+     *
+     * [manual] marks a push the user explicitly asked for (the Ustawienia button): it additionally
+     * clears the "Garmin Connect is unavailable" latch so the attempt really is a fresh one.
      */
-    fun pushCurrentState(context: Context) {
+    fun pushCurrentState(context: Context, manual: Boolean = false) {
         val appContext = context.applicationContext
+        if (manual) forceInitRetry = true
         scope.launch {
             try {
                 val prefs = PrefsManager(appContext)
@@ -112,6 +181,7 @@ object GarminBridge {
                 ensurePump(appContext)
             } catch (t: Throwable) {
                 Log.w(TAG, "Could not build the watch payload — skipping this push", t)
+                record(appContext, WatchPushOutcome.PayloadBuildFailed)
             }
         }
     }
@@ -136,6 +206,9 @@ object GarminBridge {
                     } catch (t: Throwable) {
                         // Must never let the pump die — the next toggle would then be mute.
                         Log.w(TAG, "Watch delivery failed", t)
+                        // deliver() records its own outcomes; reaching HERE means something no
+                        // inner handler expected, which used to be the one remaining silent path.
+                        record(appContext, WatchPushOutcome.DeliveryCrashed(t.javaClass.simpleName))
                     }
                 }
             }
@@ -152,38 +225,88 @@ object GarminBridge {
             ciq.knownDevices ?: emptyList()
         } catch (t: Throwable) {
             Log.i(TAG, "No known Garmin devices available: ${t.javaClass.simpleName}")
+            record(appContext, WatchPushOutcome.NoKnownDevices)
             return
         }
 
         if (devices.isEmpty()) {
             Log.i(TAG, "No Garmin device paired in Garmin Connect — nothing to push to")
+            record(appContext, WatchPushOutcome.NoKnownDevices)
             return
         }
 
+        // With several devices the LAST recorded outcome wins, which is the useful one in
+        // practice: only one of Zygmunt's paired devices is ever actually connected.
         for (device in devices) {
             try {
                 val status = ciq.getDeviceStatus(device)
                 if (status != IQDevice.IQDeviceStatus.CONNECTED) {
                     Log.i(TAG, "Skipping ${device.friendlyName}: $status")
+                    record(appContext, WatchPushOutcome.DeviceNotConnected(device.friendlyName, status?.name))
                     continue
                 }
+
+                // The "is the watch face installed?" check is NOT a gate any more. It used to
+                // `continue` here, which means a wrong answer silently killed the entire feature
+                // with nothing to show for it. And a wrong answer is likely: Pro Stat is
+                // SIDELOADED (built locally, copied to the watch over USB — it was never in the
+                // Connect IQ store), and getApplicationInfo is answered by Garmin Connect Mobile
+                // from what it knows about store-installed apps, so NOT_INSTALLED here says more
+                // about Garmin's bookkeeping than about the watch. A getApplicationInfo that
+                // times out (null) is just as uninformative.
+                //
+                // Sending to an app that genuinely is not on the watch is harmless — it comes
+                // back as a failure IQMessageStatus, which is now recorded and readable on the
+                // phone. So: note what the lookup said, then send regardless, constructing the
+                // IQApp from the known app id when the lookup gave us no object to reuse. The
+                // recorded outcome keeps the two cases apart via attemptedAnyway.
                 val app = awaitAppInfo(ciq, device)
-                if (app == null || app.status != IQApp.IQAppStatus.INSTALLED) {
-                    Log.i(TAG, "Pro Stat not installed on ${device.friendlyName} (${app?.status})")
-                    continue
+                val installed = app != null && app.status == IQApp.IQAppStatus.INSTALLED
+                if (!installed) {
+                    Log.i(TAG, "Pro Stat reported as not installed on ${device.friendlyName} " +
+                        "(${app?.status}) — sending anyway")
+                    record(appContext, WatchPushOutcome.AppNotInstalled(device.friendlyName, app?.status?.name))
                 }
-                sendPayload(ciq, device, app, payload)
+
+                val target = app ?: IQApp(PRO_STAT_APP_ID)
+                val answer = sendPayload(ciq, device, target, payload)
+                record(
+                    appContext,
+                    if (answer == null) {
+                        WatchPushOutcome.SendTimedOut(device.friendlyName, attemptedAnyway = !installed)
+                    } else {
+                        WatchPushOutcome.SendResult(
+                            device.friendlyName,
+                            answer.status?.name,
+                            attemptedAnyway = !installed
+                        )
+                    }
+                )
             } catch (t: Throwable) {
                 // One unhappy device must not stop the others from getting the update.
                 Log.w(TAG, "Push to ${device.friendlyName} failed", t)
+                record(
+                    appContext,
+                    WatchPushOutcome.DeviceNotConnected(device.friendlyName, t.javaClass.simpleName)
+                )
             }
         }
     }
 
     private suspend fun ensureSdkReady(appContext: Context): ConnectIQ? {
-        if (sdkUnavailable) return null
+        if (forceInitRetry) {
+            forceInitRetry = false
+            sdkUnavailable = false
+        }
+        if (sdkUnavailable) {
+            // Report the latched reason again (marked as remembered) instead of returning in
+            // silence: "nothing happened at all" is the one answer that helps nobody.
+            record(appContext, WatchPushOutcome.SdkInitFailed(lastInitError, remembered = true))
+            return null
+        }
         connectIQ?.takeIf { sdkReady }?.let { return it }
 
+        var initError: String? = null
         return try {
             // NOTE: the published doc shows getInstance(IQConnectType) — that overload does not
             // exist in the 2.4.0 AAR; it is getInstance(Context, IQConnectType).
@@ -207,6 +330,8 @@ object GarminBridge {
                             ) {
                                 sdkUnavailable = true
                             }
+                            initError = status?.name
+                            lastInitError = initError
                             Log.i(TAG, "Connect IQ unavailable: $status")
                             if (cont.isActive) cont.resume(false)
                         }
@@ -217,19 +342,34 @@ object GarminBridge {
                         }
                     })
                 }
-            } == true
+            }
 
-            sdkReady = ready
-            if (ready) connectIQ else null
+            // Three outcomes, not two: true = ready, false = the SDK said why (initError),
+            // null = withTimeoutOrNull gave up and no callback ever arrived. The last two look
+            // identical in a log line but mean very different things on the phone.
+            sdkReady = ready == true
+            when (ready) {
+                true -> connectIQ
+                false -> {
+                    record(appContext, WatchPushOutcome.SdkInitFailed(initError))
+                    null
+                }
+                null -> {
+                    record(appContext, WatchPushOutcome.SdkInitTimedOut)
+                    null
+                }
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "Connect IQ initialization threw", t)
+            record(appContext, WatchPushOutcome.SdkInitFailed(t.javaClass.simpleName))
             null
         }
     }
 
     /**
-     * Confirms the watch face is actually installed before sending. Skipping this check would make
-     * a missing watch face indistinguishable from a delivered-but-ignored message in the logs.
+     * Asks Garmin Connect Mobile what it thinks of the watch face. Informational only now (see the
+     * comment in deliver()): a null result — not installed, or no answer inside the timeout — no
+     * longer stops the send, it only ends up in the recorded diagnostic.
      */
     private suspend fun awaitAppInfo(ciq: ConnectIQ, device: IQDevice): IQApp? =
         withTimeoutOrNull(SDK_TIMEOUT_MS) {
@@ -250,8 +390,17 @@ object GarminBridge {
      * Awaits the send status rather than firing and forgetting: the status is the only diagnostic
      * available for "the watch face shows nothing" and it keeps the loop from flooding a flaky
      * link with overlapping transfers.
+     *
+     * Returns a [SendAnswer] when the SDK reported back, or null if it never did inside the
+     * timeout — the caller records the difference. The box exists only to keep those two apart: a
+     * bare IQMessageStatus? return would collapse "answered with a null status" into "silence".
      */
-    private suspend fun sendPayload(ciq: ConnectIQ, device: IQDevice, app: IQApp, payload: Map<String, Any>) {
+    private suspend fun sendPayload(
+        ciq: ConnectIQ,
+        device: IQDevice,
+        app: IQApp,
+        payload: Map<String, Any>
+    ): SendAnswer? =
         withTimeoutOrNull(SDK_TIMEOUT_MS) {
             suspendCancellableCoroutine { cont ->
                 ciq.sendMessage(device, app, payload, object : ConnectIQ.IQSendMessageListener {
@@ -265,10 +414,12 @@ object GarminBridge {
                         } else {
                             Log.w(TAG, "Push to ${device.friendlyName} returned $status")
                         }
-                        if (cont.isActive) cont.resume(Unit)
+                        if (cont.isActive) cont.resume(SendAnswer(status))
                     }
                 })
             }
         }
-    }
+
+    /** See [sendPayload]: "the SDK answered", with whatever status it chose to answer with. */
+    private class SendAnswer(val status: ConnectIQ.IQMessageStatus?)
 }

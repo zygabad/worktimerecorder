@@ -291,6 +291,32 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             }
 
             HorizontalDivider()
+            Text("Zegarek", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Stan ostatniej próby wysłania danych na tarczę Pro Stat. Telefon wysyła sam " +
+                "przy starcie/stopie licznika i co 15 minut — poniżej widać, co się stało " +
+                "ostatnim razem. Jeśli na zegarku nic nie ma, naciśnij przycisk i odczekaj " +
+                "kilka sekund: linijka odświeży się sama.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            // Collected, not read once: the push runs in the background and finishes a few seconds
+            // after the tap, so the line has to arrive without leaving the screen.
+            val watchStatus by vm.lastWatchPushStatus.collectAsState()
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Text(
+                    watchStatus ?: "jeszcze nie próbowano",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Button(
+                onClick = { vm.pushStateToWatchNow() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Wyślij do zegarka teraz") }
+
+            HorizontalDivider()
             val context = LocalContext.current
             val versionLabel = remember {
                 runCatching {

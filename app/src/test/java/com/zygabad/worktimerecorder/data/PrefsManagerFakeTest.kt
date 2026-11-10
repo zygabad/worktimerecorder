@@ -20,6 +20,24 @@ class PrefsManagerFakeTest {
         assertEquals(-1L, prefs.currentSessionId)
     }
 
+    /**
+     * The watch diagnostic has to survive the app process being killed — the push that produced it
+     * usually runs from the foreground service, and Zygmunt reads the line much later, after the UI
+     * process has been recreated. So it lives in SharedPreferences, not in memory.
+     */
+    @Test
+    fun `last watch push status defaults to empty and round-trips`() {
+        val prefs = testPrefsManager()
+        assertEquals("", prefs.lastWatchPushStatus)
+
+        prefs.lastWatchPushStatus = "14:32 — wyslano do Forerunner 955 (SUCCESS)"
+        assertEquals("14:32 — wyslano do Forerunner 955 (SUCCESS)", prefs.lastWatchPushStatus)
+
+        // A later attempt overwrites: only the newest outcome is of any use.
+        prefs.lastWatchPushStatus = "14:47 — Forerunner 955: NOT_CONNECTED"
+        assertEquals("14:47 — Forerunner 955: NOT_CONNECTED", prefs.lastWatchPushStatus)
+    }
+
     @Test
     fun `writes are readable back through the same instance`() {
         val prefs = testPrefsManager()
