@@ -345,4 +345,70 @@ class WatchPushStatusTest {
         assertFalse(described.contains("\n"))
         assertEquals("IllegalStateException: first line second line", described)
     }
+
+    /**
+     * "wyslano (SUCCESS)" was not enough. The watch hides the work circle whenever run=false -
+     * that is the agreed design, not a bug - so a perfectly healthy push of a STOPPED timer looks
+     * on the phone exactly like a push that achieved nothing, and on the watch exactly like a
+     * broken bridge. The line has to say what was sent, not only that something was.
+     */
+    @Test
+    fun `a running timer is summarized with its finish clock`() {
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42"))
+        )
+    }
+
+    @Test
+    fun `a stopped timer says so and says the circle will be hidden`() {
+        assertEquals(
+            "praca: nie - kolko bedzie ukryte",
+            summarizeWatchPayload(mapOf("run" to false, "fin" to ""))
+        )
+    }
+
+    @Test
+    fun `a running timer with no finish clock is still distinguishable`() {
+        assertEquals(
+            "praca: tak, brak godziny konca",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to ""))
+        )
+    }
+
+    @Test
+    fun `a payload with missing or wrongly typed keys never throws`() {
+        assertEquals("praca: nie - kolko bedzie ukryte", summarizeWatchPayload(emptyMap()))
+        assertEquals(
+            "praca: nie - kolko bedzie ukryte",
+            summarizeWatchPayload(mapOf("run" to "yes", "fin" to 1642))
+        )
+    }
+
+    @Test
+    fun `the summary is appended to a successful send, so the line says what was sent`() {
+        assertEquals(
+            "10:14 — wyslano do Forerunner 955 (SUCCESS) | praca: tak, koniec 16:42",
+            formatWatchPushStatus(
+                WatchPushOutcome.SendResult(
+                    "Forerunner 955",
+                    "SUCCESS",
+                    attemptedAnyway = false,
+                    payload = "praca: tak, koniec 16:42"
+                ),
+                at(10, 14)
+            )
+        )
+    }
+
+    @Test
+    fun `a send without a summary keeps the old shorter line`() {
+        assertEquals(
+            "10:14 — wyslano do Forerunner 955 (SUCCESS)",
+            formatWatchPushStatus(
+                WatchPushOutcome.SendResult("Forerunner 955", "SUCCESS", attemptedAnyway = false),
+                at(10, 14)
+            )
+        )
+    }
 }

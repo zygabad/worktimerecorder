@@ -10,6 +10,7 @@ import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.util.WatchPushOutcome
 import com.zygabad.worktimerecorder.util.describeThrowable
+import com.zygabad.worktimerecorder.util.summarizeWatchPayload
 import com.zygabad.worktimerecorder.util.buildWatchPayload
 import com.zygabad.worktimerecorder.util.formatWatchPushStatus
 import com.zygabad.worktimerecorder.util.shouldRetrySdkInit
@@ -295,7 +296,8 @@ object GarminBridge {
                         WatchPushOutcome.SendResult(
                             device.friendlyName,
                             answer.status?.name,
-                            attemptedAnyway = !installed
+                            attemptedAnyway = !installed,
+                            payload = summarizeWatchPayload(payload)
                         )
                     }
                 )

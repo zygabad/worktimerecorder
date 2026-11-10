@@ -60,7 +60,13 @@ sealed interface WatchPushOutcome {
     data class SendResult(
         val device: String?,
         val status: String?,
-        val attemptedAnyway: Boolean
+        val attemptedAnyway: Boolean,
+        /**
+         * What was actually in the parcel, from [summarizeWatchPayload]. Without it the line
+         * cannot tell a healthy push of a STOPPED timer (the watch then hides the circle on
+         * purpose) from a push that achieved nothing - the two look identical everywhere else.
+         */
+        val payload: String? = null
     ) : WatchPushOutcome
 
     /** sendMessage never reported a status within the SDK timeout. */
@@ -119,6 +125,21 @@ fun describeThrowable(className: String, message: String?): String {
 
 const val WATCH_SEND_STATUS_SUCCESS = "SUCCESS"
 
+/**
+ * One phrase describing the snapshot that went out, for the diagnostic line.
+ *
+ * Reads the wire payload defensively (it is a Map<String, Any>, and a future protocol version may
+ * reshape it) - a diagnostic that throws is worse than no diagnostic.
+ */
+fun summarizeWatchPayload(payload: Map<String, Any?>): String {
+    val running = payload["run"] as? Boolean ?: false
+    if (!running) {
+        return "praca: nie - kolko bedzie ukryte"
+    }
+    val finish = (payload["fin"] as? String).orEmpty()
+    return if (finish.isBlank()) "praca: tak, brak godziny konca" else "praca: tak, koniec $finish"
+}
+
 private val statusClockFmt = DateTimeFormatter.ofPattern("HH:mm")
 
 /** IQDevice.friendlyName is nullable and has been seen blank; never render an empty name. */
@@ -167,14 +188,17 @@ fun formatWatchPushStatus(
             "${deviceLabel(outcome.device)}: Garmin nie widzi tarczy " +
                 "(${outcome.status ?: "brak odpowiedzi"}) — wysylam mimo to"
 
-        is WatchPushOutcome.SendResult ->
-            if (outcome.status == WATCH_SEND_STATUS_SUCCESS) {
+        is WatchPushOutcome.SendResult -> {
+            val head = if (outcome.status == WATCH_SEND_STATUS_SUCCESS) {
                 "wyslano do ${deviceLabelGenitive(outcome.device)} " +
                     "($WATCH_SEND_STATUS_SUCCESS${anywayMark(outcome.attemptedAnyway)})"
             } else {
                 "${deviceLabel(outcome.device)}: blad wysylki " +
                     "(${outcome.status ?: "status nieznany"}${anywayMark(outcome.attemptedAnyway)})"
             }
+            val summary = outcome.payload?.takeIf { it.isNotBlank() }
+            if (summary == null) head else "$head | $summary"
+        }
 
         is WatchPushOutcome.SendTimedOut ->
             "${deviceLabel(outcome.device)}: brak odpowiedzi na wysylke " +
