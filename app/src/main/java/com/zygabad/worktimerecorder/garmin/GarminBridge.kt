@@ -9,6 +9,7 @@ import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.util.WatchPushOutcome
+import com.zygabad.worktimerecorder.util.describeThrowable
 import com.zygabad.worktimerecorder.util.buildWatchPayload
 import com.zygabad.worktimerecorder.util.formatWatchPushStatus
 import com.zygabad.worktimerecorder.util.shouldRetrySdkInit
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
@@ -218,7 +220,12 @@ object GarminBridge {
                         Log.w(TAG, "Watch delivery failed", t)
                         // deliver() records its own outcomes; reaching HERE means something no
                         // inner handler expected, which used to be the one remaining silent path.
-                        record(appContext, WatchPushOutcome.DeliveryCrashed(t.javaClass.simpleName))
+                        record(
+                            appContext,
+                            WatchPushOutcome.DeliveryCrashed(
+                                describeThrowable(t.javaClass.simpleName, t.message)
+                            )
+                        )
                     }
                 }
             }
@@ -300,7 +307,10 @@ object GarminBridge {
                 // whole value of this line is that it says what actually happened.
                 record(
                     appContext,
-                    WatchPushOutcome.DevicePushCrashed(device.friendlyName, t.javaClass.simpleName)
+                    WatchPushOutcome.DevicePushCrashed(
+                        device.friendlyName,
+                        describeThrowable(t.javaClass.simpleName, t.message)
+                    )
                 )
             }
         }
@@ -330,6 +340,18 @@ object GarminBridge {
             // Nothing else on the SDK may be called before onSdkReady() — doing so throws
             // InvalidStateException — so initialization is awaited here, once, before any use.
             val ready = withTimeoutOrNull(SDK_TIMEOUT_MS) {
+                // MUST run on the main thread. ConnectIQ.initialize() does, as its third
+                // instruction, `new Handler()` - the no-arg constructor, which binds to the
+                // Looper of whatever thread calls it and throws when that thread has none:
+                //   java.lang.RuntimeException: Can't create handler inside thread ... that has
+                //   not called Looper.prepare()
+                // (verified in the 2.4.0 AAR's bytecode, ConnectIQ.initialize offsets 10-18).
+                // This whole bridge runs on Dispatchers.IO - pool threads, no Looper - so every
+                // initialize() threw, every push died before it ever looked for a watch, and the
+                // old code swallowed it into a logcat line. That was the actual reason the watch
+                // face stayed blank. The SDK then delivers all its callbacks through that same
+                // handler, so the main looper is also where it expects to answer us.
+                withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine { cont ->
                     ciq.initialize(appContext, /* autoUI = */ false, object : ConnectIQ.ConnectIQListener {
                         override fun onSdkReady() {
@@ -356,6 +378,7 @@ object GarminBridge {
                         }
                     })
                 }
+                }
             }
 
             // Three outcomes, not two: true = ready, false = the SDK said why (initError),
@@ -375,7 +398,10 @@ object GarminBridge {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Connect IQ initialization threw", t)
-            record(appContext, WatchPushOutcome.SdkInitFailed(t.javaClass.simpleName))
+            record(
+                appContext,
+                WatchPushOutcome.SdkInitFailed(describeThrowable(t.javaClass.simpleName, t.message))
+            )
             null
         }
     }

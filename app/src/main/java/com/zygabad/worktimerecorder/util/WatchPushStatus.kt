@@ -83,6 +83,40 @@ sealed interface WatchPushOutcome {
 }
 
 /** IQMessageStatus.SUCCESS by name — the only non-failure send status. */
+/**
+ * Longest line we are willing to put in front of the user for one exception.
+ */
+private const val THROWABLE_DESCRIPTION_MAX = 80
+
+/**
+ * "ClassName: message", trimmed to one readable line.
+ *
+ * Why the message matters: the very first failure this diagnostic caught in the field recorded
+ * only "RuntimeException". A bare java.lang.RuntimeException is thrown by half of Android and
+ * names nothing; its message - "Can't create handler inside thread ... that has not called
+ * Looper.prepare()" - named the bug outright. Recording the class alone cost a round trip to the
+ * user and a dive into the Garmin AAR's bytecode to work out what it had to have been.
+ *
+ * Newlines are flattened because this is rendered as a single line, and the whole thing is cut to
+ * [THROWABLE_DESCRIPTION_MAX] so one chatty exception cannot push the timestamp off screen.
+ */
+fun describeThrowable(className: String, message: String?): String {
+    val clean = message.orEmpty()
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+        .replace('\t', ' ')
+        .trim()
+    if (clean.isEmpty()) {
+        return className
+    }
+    val full = "$className: $clean"
+    return if (full.length <= THROWABLE_DESCRIPTION_MAX) {
+        full
+    } else {
+        full.take(THROWABLE_DESCRIPTION_MAX - 3) + "..."
+    }
+}
+
 const val WATCH_SEND_STATUS_SUCCESS = "SUCCESS"
 
 private val statusClockFmt = DateTimeFormatter.ofPattern("HH:mm")

@@ -1,6 +1,7 @@
 package com.zygabad.worktimerecorder.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -308,5 +309,40 @@ class WatchPushStatusTest {
             "08:05 — zegarek: blad wysylki (nieznany wyjatek)",
             formatWatchPushStatus(WatchPushOutcome.DevicePushCrashed(null, null), at(8, 5))
         )
+    }
+
+    /**
+     * The first real field failure recorded only "RuntimeException" - the class name alone - and
+     * that cost a round trip plus a bytecode dive to identify. A bare java.lang.RuntimeException
+     * says nothing; its MESSAGE ("Can't create handler inside thread ... Looper.prepare()") says
+     * everything. So the message travels with the class name, trimmed to stay one readable line.
+     */
+    @Test
+    fun `a throwable is described by class and message, not class alone`() {
+        assertEquals(
+            "RuntimeException: Can't create handler inside thread",
+            describeThrowable("RuntimeException", "Can't create handler inside thread")
+        )
+    }
+
+    @Test
+    fun `a long message is cut instead of pushing the line off screen`() {
+        val described = describeThrowable("RuntimeException", "x".repeat(200))
+        assertTrue(described.length <= 80)
+        assertTrue(described.startsWith("RuntimeException: "))
+        assertTrue(described.endsWith("..."))
+    }
+
+    @Test
+    fun `a missing or blank message leaves just the class name`() {
+        assertEquals("SecurityException", describeThrowable("SecurityException", null))
+        assertEquals("SecurityException", describeThrowable("SecurityException", "   "))
+    }
+
+    @Test
+    fun `newlines in a message never break the single-line contract`() {
+        val described = describeThrowable("IllegalStateException", "first line\nsecond line")
+        assertFalse(described.contains("\n"))
+        assertEquals("IllegalStateException: first line second line", described)
     }
 }
