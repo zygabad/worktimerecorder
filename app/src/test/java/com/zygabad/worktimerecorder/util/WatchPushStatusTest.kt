@@ -280,4 +280,33 @@ class WatchPushStatusTest {
             assertTrue("missing the HH:mm prefix: $text", text.startsWith("14:32 — "))
         }
     }
+
+    /**
+     * A throwable thrown while pushing to one device must NOT be rendered through
+     * DeviceNotConnected. That outcome's second field is an IQDeviceStatus name, so an exception
+     * class name there would read as a state the watch reported about itself - in a line whose
+     * only job is to say what really happened.
+     */
+    @Test
+    fun `a crash while pushing to one device is not reported as a device status`() {
+        val crash = formatWatchPushStatus(
+            WatchPushOutcome.DevicePushCrashed("Forerunner 955", "InvalidStateException"),
+            at(14, 32)
+        )
+        assertEquals("14:32 — Forerunner 955: blad wysylki (InvalidStateException)", crash)
+
+        val notConnected = formatWatchPushStatus(
+            WatchPushOutcome.DeviceNotConnected("Forerunner 955", "NOT_CONNECTED"),
+            at(14, 32)
+        )
+        assertTrue(notConnected != crash)
+    }
+
+    @Test
+    fun `a nameless device crash still reads as a sentence`() {
+        assertEquals(
+            "08:05 — zegarek: blad wysylki (nieznany wyjatek)",
+            formatWatchPushStatus(WatchPushOutcome.DevicePushCrashed(null, null), at(8, 5))
+        )
+    }
 }

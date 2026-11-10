@@ -11,6 +11,7 @@ import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.util.WatchPushOutcome
 import com.zygabad.worktimerecorder.util.buildWatchPayload
 import com.zygabad.worktimerecorder.util.formatWatchPushStatus
+import com.zygabad.worktimerecorder.util.shouldRetrySdkInit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -94,13 +95,22 @@ object GarminBridge {
     private var sdkReady = false
 
     /**
-     * Set when initialization fails for a reason that cannot fix itself while the process lives
-     * (Garmin Connect Mobile missing or too old). Without this flag every single toggle would pay
-     * the full init timeout again for a user who simply has no Garmin account.
+     * When initialization last failed for a reason that cannot fix itself on the spot (Garmin
+     * Connect Mobile missing or too old), or null if no such verdict stands. Without it, every
+     * toggle would pay the full init timeout again for a user who simply has no Garmin account.
+     *
+     * This used to be a plain Boolean that was never cleared, and that was a day-long kill switch:
+     * the FIRST push of the process runs from WorkTimerApplication.onCreate, i.e. at phone cold
+     * start, which is exactly when Garmin Connect Mobile is most likely to be mid-update,
+     * force-stopped or battery-restricted — all of which surface as GCM_NOT_INSTALLED. The
+     * foreground service then keeps this process alive for the whole workday, so one bad answer
+     * at 06:50 silently muted every later push until a reboot. Now the verdict expires; see
+     * util/WatchPushRetry.kt for the window and the reasoning.
      */
-    private var sdkUnavailable = false
+    @Volatile
+    private var sdkUnavailableSince: Long? = null
 
-    /** Reason behind [sdkUnavailable], kept so a latched verdict can still name itself. */
+    /** Reason behind [sdkUnavailableSince], kept so a latched verdict can still name itself. */
     private var lastInitError: String? = null
 
     /**
@@ -285,25 +295,29 @@ object GarminBridge {
             } catch (t: Throwable) {
                 // One unhappy device must not stop the others from getting the update.
                 Log.w(TAG, "Push to ${device.friendlyName} failed", t)
+                // Deliberately NOT DeviceNotConnected: rendering an exception class name where a
+                // IQDeviceStatus belongs would read as "the watch reported this state", and the
+                // whole value of this line is that it says what actually happened.
                 record(
                     appContext,
-                    WatchPushOutcome.DeviceNotConnected(device.friendlyName, t.javaClass.simpleName)
+                    WatchPushOutcome.DevicePushCrashed(device.friendlyName, t.javaClass.simpleName)
                 )
             }
         }
     }
 
     private suspend fun ensureSdkReady(appContext: Context): ConnectIQ? {
-        if (forceInitRetry) {
+        val manual = forceInitRetry
+        if (manual) {
             forceInitRetry = false
-            sdkUnavailable = false
         }
-        if (sdkUnavailable) {
+        if (!shouldRetrySdkInit(sdkUnavailableSince, System.currentTimeMillis(), manual)) {
             // Report the latched reason again (marked as remembered) instead of returning in
             // silence: "nothing happened at all" is the one answer that helps nobody.
             record(appContext, WatchPushOutcome.SdkInitFailed(lastInitError, remembered = true))
             return null
         }
+        sdkUnavailableSince = null
         connectIQ?.takeIf { sdkReady }?.let { return it }
 
         var initError: String? = null
@@ -328,7 +342,7 @@ object GarminBridge {
                             if (status == ConnectIQ.IQSdkErrorStatus.GCM_NOT_INSTALLED ||
                                 status == ConnectIQ.IQSdkErrorStatus.GCM_UPGRADE_NEEDED
                             ) {
-                                sdkUnavailable = true
+                                sdkUnavailableSince = System.currentTimeMillis()
                             }
                             initError = status?.name
                             lastInitError = initError

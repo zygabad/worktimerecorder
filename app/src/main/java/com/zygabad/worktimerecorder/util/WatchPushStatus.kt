@@ -67,6 +67,14 @@ sealed interface WatchPushOutcome {
     data class SendTimedOut(val device: String?, val attemptedAnyway: Boolean) : WatchPushOutcome
 
     /**
+     * Something threw while pushing to ONE device, so the loop moved on to the next. Kept separate
+     * from [DeviceNotConnected] on purpose: that one's [DeviceNotConnected.status] is an
+     * IQDeviceStatus name, and putting an exception class name there would read as a state the
+     * watch reported about itself. [reason] is the throwable's class name only.
+     */
+    data class DevicePushCrashed(val device: String?, val reason: String?) : WatchPushOutcome
+
+    /**
      * The pump's last-resort catch(Throwable) around deliver() fired — something no inner handler
      * expected (a NoClassDefFoundError from a missing AAR, an SDK InvalidStateException). [reason]
      * is the throwable's class name; no message, it can carry anything.
@@ -137,6 +145,10 @@ fun formatWatchPushStatus(
         is WatchPushOutcome.SendTimedOut ->
             "${deviceLabel(outcome.device)}: brak odpowiedzi na wysylke " +
                 "(timeout${anywayMark(outcome.attemptedAnyway)})"
+
+        is WatchPushOutcome.DevicePushCrashed ->
+            "${deviceLabel(outcome.device)}: blad wysylki " +
+                "(${outcome.reason ?: "nieznany wyjatek"})"
 
         is WatchPushOutcome.DeliveryCrashed ->
             "blad mostka: ${outcome.reason ?: "nieznany wyjatek"}"
