@@ -130,14 +130,26 @@ const val WATCH_SEND_STATUS_SUCCESS = "SUCCESS"
  *
  * Reads the wire payload defensively (it is a Map<String, Any>, and a future protocol version may
  * reshape it) - a diagnostic that throws is worse than no diagnostic.
+ *
+ * The "| wrk/tgt min" tail was added after the queued-delivery day (see GarminPayload.kt's header):
+ * the line on screen said "praca: tak, koniec 16:54", which was true and still did not say WHICH
+ * snapshot the watch had - the numbers that went out (50/480, built at 09:44) would have named it
+ * on sight. The tail is omitted entirely when either number is missing or not an Int, rather than
+ * printing a placeholder: "?/480" or "0/0" would be read as "the phone sent zeroes", a different
+ * bug from "this summarizer could not read the payload". A diagnostic that lies is worse than a
+ * short one.
  */
 fun summarizeWatchPayload(payload: Map<String, Any?>): String {
     val running = payload["run"] as? Boolean ?: false
-    if (!running) {
-        return "praca: nie - kolko bedzie ukryte"
+    val head = if (!running) {
+        "praca: nie - kolko bedzie ukryte"
+    } else {
+        val finish = (payload["fin"] as? String).orEmpty()
+        if (finish.isBlank()) "praca: tak, brak godziny konca" else "praca: tak, koniec $finish"
     }
-    val finish = (payload["fin"] as? String).orEmpty()
-    return if (finish.isBlank()) "praca: tak, brak godziny konca" else "praca: tak, koniec $finish"
+    val worked = payload["wrk"] as? Int
+    val target = payload["tgt"] as? Int
+    return if (worked == null || target == null) head else "$head | $worked/$target min"
 }
 
 private val statusClockFmt = DateTimeFormatter.ofPattern("HH:mm")

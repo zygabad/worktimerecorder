@@ -355,24 +355,37 @@ class WatchPushStatusTest {
     @Test
     fun `a running timer is summarized with its finish clock`() {
         assertEquals(
-            "praca: tak, koniec 16:42",
-            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42"))
+            "praca: tak, koniec 16:42 | 50/480 min",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "wrk" to 50, "tgt" to 480))
         )
     }
 
     @Test
     fun `a stopped timer says so and says the circle will be hidden`() {
         assertEquals(
-            "praca: nie - kolko bedzie ukryte",
-            summarizeWatchPayload(mapOf("run" to false, "fin" to ""))
+            "praca: nie - kolko bedzie ukryte | 50/480 min",
+            summarizeWatchPayload(mapOf("run" to false, "fin" to "", "wrk" to 50, "tgt" to 480))
         )
     }
 
     @Test
     fun `a running timer with no finish clock is still distinguishable`() {
         assertEquals(
-            "praca: tak, brak godziny konca",
-            summarizeWatchPayload(mapOf("run" to true, "fin" to ""))
+            "praca: tak, brak godziny konca | 50/480 min",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "", "wrk" to 50, "tgt" to 480))
+        )
+    }
+
+    /**
+     * The numbers are the reason this tail exists. On the 9.5h-queued-delivery day the status line
+     * read only "praca: tak, koniec 16:54" — true, and still not enough to tell which snapshot the
+     * watch was showing. "50/480" would have named the 09:44 build on sight.
+     */
+    @Test
+    fun `the worked and target minutes are on the line, not just the finish clock`() {
+        assertEquals(
+            "praca: tak, koniec 16:54 | 50/480 min",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:54", "wrk" to 50, "tgt" to 480))
         )
     }
 
@@ -385,6 +398,60 @@ class WatchPushStatusTest {
         )
     }
 
+    /**
+     * Omit the tail rather than print a placeholder: a diagnostic that says "?/480" or "0/0" would
+     * be read as "the phone sent zeroes", which is a different bug from "the phone sent a payload
+     * this summarizer could not read". Short beats wrong.
+     */
+    @Test
+    fun `missing worked or target minutes drop the tail instead of inventing numbers`() {
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42"))
+        )
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "wrk" to 50))
+        )
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "tgt" to 480))
+        )
+        assertEquals(
+            "praca: nie - kolko bedzie ukryte",
+            summarizeWatchPayload(mapOf("run" to false, "fin" to ""))
+        )
+    }
+
+    @Test
+    fun `wrongly typed worked or target minutes drop the tail and never throw`() {
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "wrk" to "50", "tgt" to 480))
+        )
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "wrk" to 50, "tgt" to 480L))
+        )
+        assertEquals(
+            "praca: tak, koniec 16:42",
+            summarizeWatchPayload(mapOf("run" to true, "fin" to "16:42", "wrk" to null, "tgt" to null))
+        )
+    }
+
+    /** The real v2 payload shape, straight through buildWatchPayload — no hand-built map. */
+    @Test
+    fun `a real v2 payload summarizes with its worked and target minutes`() {
+        val payload = buildWatchPayload(
+            isWorking = true,
+            workedMinutes = 50,
+            targetMinutes = 480,
+            nowMillis = at(9, 44),
+            zone = zone
+        )
+        assertEquals("praca: tak, koniec 16:54 | 50/480 min", summarizeWatchPayload(payload))
+    }
+
     @Test
     fun `the summary is appended to a successful send, so the line says what was sent`() {
         assertEquals(
@@ -395,6 +462,48 @@ class WatchPushStatusTest {
                     "SUCCESS",
                     attemptedAnyway = false,
                     payload = "praca: tak, koniec 16:42"
+                ),
+                at(10, 14)
+            )
+        )
+    }
+
+    /**
+     * The whole line, with the longer v2 summary on it: the status row is what Zygmunt actually
+     * reads on the phone, so the composition of prefix + send result + summary is pinned, not just
+     * the summary in isolation.
+     */
+    @Test
+    fun `the full send line still renders correctly with the longer payload summary`() {
+        assertEquals(
+            "10:14 — wyslano do Forerunner 955 (SUCCESS) | praca: tak, koniec 16:54 | 50/480 min",
+            formatWatchPushStatus(
+                WatchPushOutcome.SendResult(
+                    "Forerunner 955",
+                    "SUCCESS",
+                    attemptedAnyway = false,
+                    payload = summarizeWatchPayload(
+                        mapOf("run" to true, "fin" to "16:54", "wrk" to 50, "tgt" to 480)
+                    )
+                ),
+                at(10, 14)
+            )
+        )
+    }
+
+    @Test
+    fun `a failed send also carries the longer payload summary`() {
+        assertEquals(
+            "10:14 — Forerunner 955: blad wysylki (FAILURE_UNKNOWN) | " +
+                "praca: nie - kolko bedzie ukryte | 50/480 min",
+            formatWatchPushStatus(
+                WatchPushOutcome.SendResult(
+                    "Forerunner 955",
+                    "FAILURE_UNKNOWN",
+                    attemptedAnyway = false,
+                    payload = summarizeWatchPayload(
+                        mapOf("run" to false, "fin" to "", "wrk" to 50, "tgt" to 480)
+                    )
                 ),
                 at(10, 14)
             )

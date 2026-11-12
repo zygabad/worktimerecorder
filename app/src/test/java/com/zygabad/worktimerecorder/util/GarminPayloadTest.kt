@@ -1,6 +1,7 @@
 package com.zygabad.worktimerecorder.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -33,7 +34,7 @@ class GarminPayloadTest {
             nowMillis = at(13, 0),
             zone = zone
         )
-        assertEquals(1, p["v"])
+        assertEquals(2, p["v"])
         assertEquals(true, p["run"])
         assertEquals("16:30", p["fin"])   // 13:00 + 3h30
         assertEquals(210 * 60, p["rem"])
@@ -43,12 +44,61 @@ class GarminPayloadTest {
     }
 
     @Test
-    fun `payload carries exactly the seven contract keys and nothing else`() {
+    fun `payload carries exactly the eight contract keys and nothing else`() {
         val p = buildWatchPayload(
             isWorking = true, workedMinutes = 120, targetMinutes = 480,
             nowMillis = at(10, 0), zone = zone
         )
-        assertEquals(setOf("v", "run", "fin", "rem", "over", "wrk", "tgt"), p.keys)
+        assertEquals(setOf("v", "run", "fin", "rem", "over", "wrk", "tgt", "ts"), p.keys)
+    }
+
+    // --- "ts": the build time, added in v2 after a 9.5h queued delivery ---
+
+    /**
+     * The field bug "ts" exists for: Garmin Connect queued one message for ~9.5 hours. A snapshot
+     * built at 09:44 (worked 50, rem 430) arrived at 19:15 and the watch, which anchors the
+     * countdown to its OWN clock on arrival, rendered it as fresh — "7h04m left" at 19:21. The
+     * watch cannot detect that without knowing when the phone built the snapshot, so v2 puts the
+     * build time on the wire. Seconds, not millis — see the Int-range test below.
+     */
+    @Test
+    fun `ts carries the phone's build time in epoch seconds`() {
+        val now = at(13, 0)
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 300, targetMinutes = 510,
+            nowMillis = now, zone = zone
+        )
+        assertEquals((now / 1000).toInt(), p["ts"])
+    }
+
+    @Test
+    fun `ts is present and still the build time when the timer is stopped`() {
+        val now = at(17, 30)
+        val p = buildWatchPayload(
+            isWorking = false, workedMinutes = 480, targetMinutes = 480,
+            nowMillis = now, zone = zone
+        )
+        assertEquals((now / 1000).toInt(), p["ts"])
+    }
+
+    /**
+     * The 32-bit trap, made explicit: the Mobile SDK maps Int -> Monkey C Number, which is 32-bit
+     * signed (max 2_147_483_647). Epoch MILLIS for 2026 is ~1.76e12 and cannot be represented;
+     * epoch SECONDS is ~1.76e9 and fits until 2038. This is the same class of mistake
+     * GarminPayload.kt's header warns about — the watch face would just render nothing.
+     */
+    @Test
+    fun `ts for a realistic 2026 instant stays inside the 32-bit Number range`() {
+        val now = at(19, 15)
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 50, targetMinutes = 480,
+            nowMillis = now, zone = zone
+        )
+        val ts = p["ts"] as Int
+        assertTrue("ts must be positive, was $ts", ts > 0)
+        assertTrue("ts must fit in a 32-bit signed Number, was $ts", ts <= Int.MAX_VALUE)
+        // And prove the millis form would NOT have fit, which is the whole reason for seconds.
+        assertTrue("epoch millis was expected to overflow Int", now > Int.MAX_VALUE.toLong())
     }
 
     /**
@@ -70,6 +120,9 @@ class GarminPayloadTest {
         assertEquals(Integer::class.java, p["over"]!!.javaClass)
         assertEquals(Integer::class.java, p["wrk"]!!.javaClass)
         assertEquals(Integer::class.java, p["tgt"]!!.javaClass)
+        // Must be Integer, never Long: epoch millis in a Long would overflow Monkey C's 32-bit
+        // Number, so the type is as load-bearing here as the unit.
+        assertEquals(Integer::class.java, p["ts"]!!.javaClass)
     }
 
     // --- The exact boundary and past it ---
