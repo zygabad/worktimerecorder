@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * Wire-contract tests for the Garmin watch-face payload. The watch side (ProStat watch face) is
@@ -23,6 +24,21 @@ class GarminPayloadTest {
         LocalDateTime.of(2026, 11, day, hour, minute)
             .atZone(zone).toInstant().toEpochMilli()
 
+    /**
+     * Same, with SECONDS and a month, because "mid" (v3) renders down to the second — a helper
+     * that can only express whole minutes would pin half the digits of the id it is testing.
+     */
+    private fun at(
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        second: Int,
+        millisOfSecond: Int = 0
+    ): Long =
+        LocalDateTime.of(2026, month, day, hour, minute, second)
+            .atZone(zone).toInstant().toEpochMilli() + millisOfSecond
+
     // --- Running, time still left on the target ---
 
     @Test
@@ -34,7 +50,7 @@ class GarminPayloadTest {
             nowMillis = at(13, 0),
             zone = zone
         )
-        assertEquals(2, p["v"])
+        assertEquals(3, p["v"])
         assertEquals(true, p["run"])
         assertEquals("16:30", p["fin"])   // 13:00 + 3h30
         assertEquals(210 * 60, p["rem"])
@@ -44,12 +60,95 @@ class GarminPayloadTest {
     }
 
     @Test
-    fun `payload carries exactly the eight contract keys and nothing else`() {
+    fun `payload carries exactly the nine contract keys and nothing else`() {
         val p = buildWatchPayload(
             isWorking = true, workedMinutes = 120, targetMinutes = 480,
             nowMillis = at(10, 0), zone = zone
         )
-        assertEquals(setOf("v", "run", "fin", "rem", "over", "wrk", "tgt", "ts"), p.keys)
+        assertEquals(setOf("v", "run", "fin", "rem", "over", "wrk", "tgt", "ts", "mid"), p.keys)
+    }
+
+    // --- "mid": the human-comparable message id, added in v3 ---
+
+    /**
+     * The field bug "mid" exists for: on 2026-11-13 08:11 the phone's status line said
+     * "praca: tak, koniec 15:57 | 14/480 min" while the watch, holding a record it had received
+     * seven seconds earlier, displayed a finish clock of 16:54 — yesterday's value. Nothing on
+     * either screen could prove whether those two screens were showing the SAME message or two
+     * different ones, so the whole diagnosis rested on inference. v3 puts a printable id on the
+     * wire, shown on both screens, so the comparison is digit-by-digit and needs no inference.
+     *
+     * yyMMddHHmmss in LOCAL time, because the person comparing the two screens is in local time.
+     */
+    @Test
+    fun `mid is the local build time as yyMMddHHmmss`() {
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 14, targetMinutes = 480,
+            nowMillis = at(month = 11, day = 13, hour = 7, minute = 56, second = 12),
+            zone = zone
+        )
+        assertEquals("261113075612", p["mid"])
+    }
+
+    /**
+     * A String on the wire, deliberately. It is a label for a HUMAN to read off two screens, not a
+     * number: as an Int it would both overflow Monkey C's 32-bit Number (261113075612 >> 2.1e9)
+     * and lose any leading zero in a formatted component. "ts" remains the machine-readable
+     * ordering key — mid must never be parsed for arithmetic.
+     */
+    @Test
+    fun `mid is a String and never a number`() {
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 0, targetMinutes = 480,
+            nowMillis = at(month = 1, day = 5, hour = 6, minute = 7, second = 8),
+            zone = zone
+        )
+        assertEquals(java.lang.String::class.java, p["mid"]!!.javaClass)
+        // Every component zero-padded: 2026-01-05 06:07:08, not "2615678".
+        assertEquals("260105060708", p["mid"])
+        assertEquals(12, (p["mid"] as String).length)
+    }
+
+    /**
+     * mid and ts must name the same instant, or the id the user compares by eye would belong to a
+     * different snapshot than the one the watch's staleness check reasons about — which is the
+     * exact confusion this whole feature exists to remove. mid is second-resolution, so ts is
+     * compared truncated to the second (it already is: epoch millis / 1000).
+     */
+    @Test
+    fun `mid and ts describe the same instant`() {
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 300, targetMinutes = 510,
+            nowMillis = at(month = 11, day = 13, hour = 7, minute = 56, second = 12, millisOfSecond = 940),
+            zone = zone
+        )
+        val fromMid = LocalDateTime
+            .parse(p["mid"] as String, DateTimeFormatter.ofPattern("yyMMddHHmmss"))
+            .atZone(zone)
+            .toEpochSecond()
+        assertEquals(fromMid, (p["ts"] as Int).toLong())
+    }
+
+    @Test
+    fun `mid is present and still the build time when the timer is stopped`() {
+        val p = buildWatchPayload(
+            isWorking = false, workedMinutes = 480, targetMinutes = 480,
+            nowMillis = at(month = 11, day = 13, hour = 17, minute = 30, second = 5),
+            zone = zone
+        )
+        assertEquals("261113173005", p["mid"])
+    }
+
+    /** Local time, like "fin" — a UTC-rendered id would not match the clock the user is reading. */
+    @Test
+    fun `mid is rendered in the supplied zone, not UTC`() {
+        // 12:00 Warsaw in November is 11:00 UTC — a UTC-rendered id would say 261113110000.
+        val p = buildWatchPayload(
+            isWorking = true, workedMinutes = 0, targetMinutes = 120,
+            nowMillis = at(month = 11, day = 13, hour = 12, minute = 0, second = 0),
+            zone = zone
+        )
+        assertEquals("261113120000", p["mid"])
     }
 
     // --- "ts": the build time, added in v2 after a 9.5h queued delivery ---
@@ -123,6 +222,9 @@ class GarminPayloadTest {
         // Must be Integer, never Long: epoch millis in a Long would overflow Monkey C's 32-bit
         // Number, so the type is as load-bearing here as the unit.
         assertEquals(Integer::class.java, p["ts"]!!.javaClass)
+        // And mid the other way round: a String, never a Number - see the `mid is a String and
+        // never a number` test above for why.
+        assertEquals(java.lang.String::class.java, p["mid"]!!.javaClass)
     }
 
     // --- The exact boundary and past it ---

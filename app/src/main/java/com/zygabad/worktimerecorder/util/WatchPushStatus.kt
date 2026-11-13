@@ -138,6 +138,15 @@ const val WATCH_SEND_STATUS_SUCCESS = "SUCCESS"
  * printing a placeholder: "?/480" or "0/0" would be read as "the phone sent zeroes", a different
  * bug from "this summarizer could not read the payload". A diagnostic that lies is worse than a
  * short one.
+ *
+ * The "| #id" tail was added in v3, for the same reason one step further on: at 08:11 on
+ * 2026-11-13 this line read "praca: tak, koniec 15:57 | 14/480 min" while the watch, holding a
+ * record received seven seconds earlier, showed 16:54. The numbers named the snapshot the PHONE
+ * built; nothing on either screen could prove the watch was showing that same one. The id (see
+ * GarminPayload.kt's "mid") is printed on both screens so the question is settled by comparing
+ * digits. The "#" is there so it reads as a label and never as another clock time, and the tail is
+ * dropped entirely when the id is missing, blank or not a String - a v2 payload must still
+ * summarize, and "#?" would be read as a broken id rather than an unreadable one.
  */
 fun summarizeWatchPayload(payload: Map<String, Any?>): String {
     val running = payload["run"] as? Boolean ?: false
@@ -149,7 +158,9 @@ fun summarizeWatchPayload(payload: Map<String, Any?>): String {
     }
     val worked = payload["wrk"] as? Int
     val target = payload["tgt"] as? Int
-    return if (worked == null || target == null) head else "$head | $worked/$target min"
+    val withMinutes = if (worked == null || target == null) head else "$head | $worked/$target min"
+    val messageId = (payload["mid"] as? String)?.takeIf { it.isNotBlank() }
+    return if (messageId == null) withMinutes else "$withMinutes | #$messageId"
 }
 
 private val statusClockFmt = DateTimeFormatter.ofPattern("HH:mm")

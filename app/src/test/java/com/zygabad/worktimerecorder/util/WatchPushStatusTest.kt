@@ -2,6 +2,7 @@ package com.zygabad.worktimerecorder.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -261,9 +262,17 @@ class WatchPushStatusTest {
      * The line is read in a Card in Ustawienia, on a phone, at work. Two lines of body text is the
      * budget; ~80 characters is comfortably inside that at bodyMedium, so this guards against a
      * future outcome being given a paragraph for a message.
+     *
+     * Scope, narrowed deliberately (v3): this 90-character claim is only true of a line WITHOUT a
+     * payload summary, and it always was — the list below has never contained a SendResult that
+     * carried one, so the bound was quietly being asserted about the short half of the outcomes
+     * only. Since v2 a SendResult with a summary is well past 90, and v3's message id makes it
+     * longer again. Rather than delete the budget or inflate it until it means nothing, the claim
+     * now says what it can actually honour, and the payload-carrying worst case is pinned
+     * separately in the next test.
      */
     @Test
-    fun `every outcome fits in a short one or two line message`() {
+    fun `every outcome without a payload summary fits in a short one or two line message`() {
         val all = listOf(
             WatchPushOutcome.PayloadBuildFailed,
             WatchPushOutcome.SdkInitFailed("GCM_UPGRADE_NEEDED", remembered = true),
@@ -276,10 +285,63 @@ class WatchPushStatusTest {
             WatchPushOutcome.DeliveryCrashed("ServiceUnavailableException")
         )
         all.forEach { outcome ->
+            assertNull("this test is only about payload-less lines", (outcome as? WatchPushOutcome.SendResult)?.payload)
             val text = line(outcome)
             assertTrue("too long to read on a phone: $text", text.length <= 90)
             assertTrue("missing the HH:mm prefix: $text", text.startsWith("14:32 — "))
         }
+    }
+
+    /**
+     * The other half: a send line that DOES carry a payload summary. This is the realistic worst
+     * case, built from the longest form of every part rather than guessed — longest head
+     * ("blad wysylki" with the longest IQMessageStatus name we have seen plus the mimo-NOT_INSTALLED
+     * marker), longest summary head ("praca: nie - kolko bedzie ukryte"), four-digit worked and
+     * target minutes, and the 12-digit message id.
+     *
+     * It does NOT fit the two-line phone budget and is not pretended to: the number below is a
+     * measurement, so that a future addition to the line is a deliberate decision with a visible
+     * cost rather than a surprise. Whether the UI should wrap or split this row is a product call,
+     * not this test's to make.
+     */
+    @Test
+    fun `the payload-carrying worst case is measured, not assumed to fit`() {
+        val worst = formatWatchPushStatus(
+            WatchPushOutcome.SendResult(
+                "Forerunner 955",
+                "FAILURE_DEVICE_NOT_CONNECTED",
+                attemptedAnyway = true,
+                payload = summarizeWatchPayload(
+                    mapOf(
+                        "run" to false, "fin" to "", "wrk" to 1439, "tgt" to 1440,
+                        "mid" to "261113075612"
+                    )
+                )
+            ),
+            at(14, 32)
+        )
+        assertEquals(
+            "14:32 — Forerunner 955: blad wysylki (FAILURE_DEVICE_NOT_CONNECTED, mimo NOT_INSTALLED) | " +
+                "praca: nie - kolko bedzie ukryte | 1439/1440 min | #261113075612",
+            worst
+        )
+        // Measured, not assumed: 154 characters at v3. The same line without the id - i.e. what
+        // v2 already produced - is measured alongside it so the cost of the id is a number on the
+        // record (16 characters) rather than a recollection. Neither fits the two-line phone
+        // budget; this assertion is a tripwire against the line growing further unnoticed.
+        val sameLineWithoutTheId = formatWatchPushStatus(
+            WatchPushOutcome.SendResult(
+                "Forerunner 955",
+                "FAILURE_DEVICE_NOT_CONNECTED",
+                attemptedAnyway = true,
+                payload = summarizeWatchPayload(
+                    mapOf("run" to false, "fin" to "", "wrk" to 1439, "tgt" to 1440)
+                )
+            ),
+            at(14, 32)
+        )
+        assertEquals(138, sameLineWithoutTheId.length)
+        assertEquals(154, worst.length)
     }
 
     /**
@@ -389,6 +451,91 @@ class WatchPushStatusTest {
         )
     }
 
+    // --- "mid": the id the user compares against the watch, digit by digit (v3) ---
+
+    /**
+     * On 2026-11-13 08:11 this line said "praca: tak, koniec 15:57 | 14/480 min" while the watch,
+     * holding a record received seven seconds earlier, showed 16:54. Both screens were internally
+     * plausible and neither carried anything that could prove they were - or were not - the same
+     * message. The id ends the guessing: read it off the phone, read it off the watch face, compare
+     * the digits. It is printed with a leading "#" so it reads as a label and never as a time.
+     */
+    @Test
+    fun `a running summary carries the message id`() {
+        assertEquals(
+            "praca: tak, koniec 15:57 | 14/480 min | #261113075612",
+            summarizeWatchPayload(
+                mapOf(
+                    "run" to true, "fin" to "15:57", "wrk" to 14, "tgt" to 480,
+                    "mid" to "261113075612"
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `a stopped summary carries the message id too`() {
+        assertEquals(
+            "praca: nie - kolko bedzie ukryte | 50/480 min | #261113075612",
+            summarizeWatchPayload(
+                mapOf(
+                    "run" to false, "fin" to "", "wrk" to 50, "tgt" to 480,
+                    "mid" to "261113075612"
+                )
+            )
+        )
+    }
+
+    /**
+     * Same rule as the worked/target tail: omit it rather than print a placeholder. "#?" or "#-"
+     * would be read as "the phone sent a broken id", a different bug from "this summarizer could
+     * not read the id". Short beats wrong. A v2 payload (no "mid" at all) must still summarize.
+     */
+    @Test
+    fun `a missing blank or wrongly typed message id drops the tail and never throws`() {
+        val base = mapOf<String, Any?>("run" to true, "fin" to "15:57", "wrk" to 14, "tgt" to 480)
+        val expected = "praca: tak, koniec 15:57 | 14/480 min"
+        assertEquals(expected, summarizeWatchPayload(base))
+        assertEquals(expected, summarizeWatchPayload(base + ("mid" to null)))
+        assertEquals(expected, summarizeWatchPayload(base + ("mid" to "")))
+        assertEquals(expected, summarizeWatchPayload(base + ("mid" to "   ")))
+        assertEquals(expected, summarizeWatchPayload(base + ("mid" to 261113075612L)))
+    }
+
+    /** The id survives even when the numbers could not be read - it is the part that identifies. */
+    @Test
+    fun `the message id is still shown when the worked and target tail is dropped`() {
+        assertEquals(
+            "praca: tak, koniec 15:57 | #261113075612",
+            summarizeWatchPayload(
+                mapOf("run" to true, "fin" to "15:57", "mid" to "261113075612")
+            )
+        )
+    }
+
+    /** The whole status row as Zygmunt reads it on the phone, id included. */
+    @Test
+    fun `the full send line renders with the message id on the end`() {
+        assertEquals(
+            "08:11 — wyslano do Forerunner 955 (SUCCESS) | " +
+                "praca: tak, koniec 15:57 | 14/480 min | #261113075612",
+            formatWatchPushStatus(
+                WatchPushOutcome.SendResult(
+                    "Forerunner 955",
+                    "SUCCESS",
+                    attemptedAnyway = false,
+                    payload = summarizeWatchPayload(
+                        mapOf(
+                            "run" to true, "fin" to "15:57", "wrk" to 14, "tgt" to 480,
+                            "mid" to "261113075612"
+                        )
+                    )
+                ),
+                at(8, 11)
+            )
+        )
+    }
+
     @Test
     fun `a payload with missing or wrongly typed keys never throws`() {
         assertEquals("praca: nie - kolko bedzie ukryte", summarizeWatchPayload(emptyMap()))
@@ -439,9 +586,14 @@ class WatchPushStatusTest {
         )
     }
 
-    /** The real v2 payload shape, straight through buildWatchPayload — no hand-built map. */
+    /**
+     * The real payload shape, straight through buildWatchPayload — no hand-built map. Updated for
+     * v3: a real payload now always carries "mid", so the end-to-end summary carries the id too.
+     * The id is the build time of this very snapshot (2026-11-10 09:44:00 local), which is what
+     * makes it comparable with the watch.
+     */
     @Test
-    fun `a real v2 payload summarizes with its worked and target minutes`() {
+    fun `a real v3 payload summarizes with its worked target minutes and message id`() {
         val payload = buildWatchPayload(
             isWorking = true,
             workedMinutes = 50,
@@ -449,7 +601,10 @@ class WatchPushStatusTest {
             nowMillis = at(9, 44),
             zone = zone
         )
-        assertEquals("praca: tak, koniec 16:54 | 50/480 min", summarizeWatchPayload(payload))
+        assertEquals(
+            "praca: tak, koniec 16:54 | 50/480 min | #261110094400",
+            summarizeWatchPayload(payload)
+        )
     }
 
     @Test

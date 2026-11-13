@@ -24,14 +24,32 @@ import java.time.format.DateTimeFormatter
  * the watch still anchors to its own clock, exactly as before, and only uses ts to notice that a
  * snapshot is too old to render as fresh. Everything else is still a duration or a pre-rendered
  * local clock string.
+ *
+ * Message ids — why v3 adds "mid". On 2026-11-13 08:11 the phone's own status line said
+ * "praca: tak, koniec 15:57 | 14/480 min" while the watch, holding a record it had received seven
+ * seconds earlier, displayed a finish clock of 16:54 — the previous day's value. Both screens were
+ * internally plausible and neither carried anything that could settle whether they were showing
+ * the SAME message or two different ones, so the diagnosis rested entirely on inference. v3 puts a
+ * printable id on the wire, rendered on the phone AND on the watch face, so the two screens can be
+ * compared digit by digit. It is a String for a human to read, never a number to compute with: the
+ * machine-readable ordering key stays "ts".
  */
 private val wireClockFmt = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
+ * The message id's format: yyMMddHHmmss in LOCAL time (e.g. "261113075612"), because the person
+ * holding the phone next to the watch is reading local time on both. Twelve fixed-width digits —
+ * short enough to compare by eye on a watch face, long enough that two snapshots on the same day
+ * cannot collide unless they were built in the same second.
+ */
+private val wireIdFmt = DateTimeFormatter.ofPattern("yyMMddHHmmss")
+
+/**
  * Protocol version on the wire — bump only together with the watch face's own parser.
  * v2 added "ts" (see the file header: the 9.5h queued-delivery bug).
+ * v3 added "mid" (see the file header: the two screens that could not be compared).
  */
-const val WATCH_PAYLOAD_VERSION = 2
+const val WATCH_PAYLOAD_VERSION = 3
 
 /**
  * "When do I get to go home" as a 24h HH:mm local clock string: now + whatever is LEFT of the
@@ -51,7 +69,7 @@ fun formatFinishClock(
 }
 
 /**
- * The frozen wire contract — exactly these eight keys, no more:
+ * The frozen wire contract — exactly these nine keys, no more:
  *  "v"    Int     protocol version, always WATCH_PAYLOAD_VERSION
  *  "run"  Boolean is the work timer running right now
  *  "fin"  String  "HH:MM" 24h local finish clock, "" when not running (a stale clock time on a
@@ -63,6 +81,12 @@ fun formatFinishClock(
  *  "ts"   Int     epoch SECONDS when the phone built this snapshot (v2+). For staleness detection
  *                 only — see the file header. Seconds and not millis because of the 32-bit trap
  *                 below.
+ *  "mid"  String  the same instant as "ts", printed as local "yyMMddHHmmss" (v3+). A human-
+ *                 comparable id for ONE purpose: the phone shows it in the push-status line and
+ *                 the watch face shows it on screen, so "is the watch displaying the message the
+ *                 phone says it sent?" is answered by comparing digits instead of by inference.
+ *                 Never parse it for arithmetic or ordering — "ts" is the machine-readable key,
+ *                 and the watch decides what is newer with that one.
  *
  * rem/over/wrk/tgt stay populated even when run == false: the watch face still wants to show how
  * much of the day is outstanding after a stop, and it has the "run" flag to decide whether to
@@ -88,6 +112,12 @@ fun buildWatchPayload(
     // this file's header warns about. Epoch seconds is ~1.76e9 and fits until 2038-01-19.
     val builtAtEpochSeconds = (nowMillis / 1000).toInt()
 
+    // A String on the wire, deliberately: this one is for a HUMAN to compare between two screens,
+    // not for the watch to compute with. As a Number it would overflow Monkey C's 32-bit Number
+    // anyway (261113075612 >> 2_147_483_647) and lose the zero-padding that makes the digits line
+    // up by eye. Built from the SAME nowMillis as "ts" so the two always name one instant.
+    val messageId = Instant.ofEpochMilli(nowMillis).atZone(zone).format(wireIdFmt)
+
     return mapOf(
         "v" to WATCH_PAYLOAD_VERSION,
         "run" to isWorking,
@@ -96,6 +126,7 @@ fun buildWatchPayload(
         "over" to (worked - target).coerceAtLeast(0),
         "wrk" to worked,
         "tgt" to target,
-        "ts" to builtAtEpochSeconds
+        "ts" to builtAtEpochSeconds,
+        "mid" to messageId
     )
 }
