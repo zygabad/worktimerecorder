@@ -11,6 +11,8 @@ import com.zygabad.worktimerecorder.garmin.GarminBridge
 import com.zygabad.worktimerecorder.repository.DayLocationRepository
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
+import com.zygabad.worktimerecorder.util.WatchPushHistoryEntry
+import com.zygabad.worktimerecorder.util.WatchPushReason
 import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
 import androidx.glance.appwidget.updateAll
 import com.zygabad.worktimerecorder.util.combineDateTime
@@ -135,7 +137,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
             WorkTimerGlanceWidget().updateAll(app)
-            pushStateToWatch()
+            // THE push for an in-app start/stop: the service no longer pushes when it starts.
+            pushStateToWatch(if (prefs.isWorking) WatchPushReason.START else WatchPushReason.STOP)
         }
     }
 
@@ -149,7 +152,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // Pushed unconditionally: a back-fill for an earlier day leaves today's total (and
             // therefore the payload) unchanged, so there is nothing to gain from deciding here
             // whether the edited date was today — the push rebuilds the snapshot from the DB.
-            pushStateToWatch()
+            pushStateToWatch(WatchPushReason.BACKFILL)
         }
     }
 
@@ -161,7 +164,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
                 WorkTimerGlanceWidget().updateAll(app)
             }
-            pushStateToWatch()
+            pushStateToWatch(WatchPushReason.DELETE)
         }
     }
 
@@ -170,7 +173,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val newStart = combineDateTime(session.date, hour, minute)
             withContext(Dispatchers.IO) { repo.updateSessionTimes(session, newStart, session.endTime) }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
-            pushStateToWatch()
+            pushStateToWatch(WatchPushReason.EDIT)
         }
     }
 
@@ -183,7 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 app.stopService(Intent(app, WorkTimerService::class.java))
             }
             WorkTimerGlanceWidget().updateAll(getApplication<Application>())
-            pushStateToWatch()
+            pushStateToWatch(WatchPushReason.EDIT)
         }
     }
 
@@ -193,9 +196,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * prefs.targetWorkMinutes straight from MainScreen, and SettingsScreen does the same), session
      * edits/deletes and manual back-fills — because the watch has no way to pull state for itself:
      * if the phone doesn't push after a change, the watch keeps showing the old finish time.
-     * Entirely best-effort; see GarminBridge.
+     * Entirely best-effort; see GarminBridge. [reason] ends up in the push history.
      */
-    fun pushStateToWatch() = GarminBridge.pushCurrentState(getApplication<Application>())
+    fun pushStateToWatch(reason: WatchPushReason) =
+        GarminBridge.pushCurrentState(getApplication<Application>(), reason)
 
     /**
      * Outcome of the last push attempt, as one ready-to-read Polish line (util/WatchPushStatus.kt),
@@ -210,7 +214,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * "Garmin Connect is unavailable" latch — otherwise the button could only ever replay a
      * verdict the process reached hours earlier.
      */
-    fun pushStateToWatchNow() = GarminBridge.pushCurrentState(getApplication<Application>(), manual = true)
+    fun pushStateToWatchNow() =
+        GarminBridge.pushCurrentState(getApplication<Application>(), WatchPushReason.MANUAL, manual = true)
+
+    /** Last 20 push outcomes, newest first (null until seeded); see util/WatchPushHistory.kt. */
+    val watchPushHistory: StateFlow<List<WatchPushHistoryEntry>?> = GarminBridge.observePushHistory(app)
+
+    /** True while "Wyczysc kolejke zegarka" runs, so the button can be disabled. */
+    val watchQueueDrainRunning: StateFlow<Boolean> = GarminBridge.drainRunning
+
+    /** "Wyczysc kolejke zegarka" — see GarminBridge.drainWatchQueue. */
+    fun drainWatchQueue() = GarminBridge.drainWatchQueue(getApplication<Application>())
 
     fun previousWeek() { _weekStart.value = _weekStart.value.minusWeeks(1) }
 

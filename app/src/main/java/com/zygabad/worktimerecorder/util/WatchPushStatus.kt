@@ -190,7 +190,16 @@ fun formatWatchPushStatus(
     zone: ZoneId = ZoneId.systemDefault()
 ): String {
     val time = Instant.ofEpochMilli(nowMillis).atZone(zone).format(statusClockFmt)
-    val text = when (outcome) {
+    return "$time — ${describeWatchPushOutcome(outcome)}"
+}
+
+/**
+ * The "<co sie stalo>" half of [formatWatchPushStatus], without the clock. Split out in v1.30 so the
+ * push history (util/WatchPushHistory.kt) words every outcome exactly like the status line does,
+ * instead of keeping a second copy of these sentences that could drift.
+ */
+fun describeWatchPushOutcome(outcome: WatchPushOutcome): String =
+    when (outcome) {
         WatchPushOutcome.PayloadBuildFailed ->
             "nie udalo sie zbudowac danych"
 
@@ -234,5 +243,3 @@ fun formatWatchPushStatus(
         is WatchPushOutcome.DeliveryCrashed ->
             "blad mostka: ${outcome.reason ?: "nieznany wyjatek"}"
     }
-    return "$time — $text"
-}

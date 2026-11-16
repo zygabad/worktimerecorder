@@ -10,6 +10,7 @@ import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.garmin.GarminBridge
 import com.zygabad.worktimerecorder.repository.WorkRepository
+import com.zygabad.worktimerecorder.util.WatchPushReason
 import com.zygabad.worktimerecorder.widget.WorkTimerGlanceWidget
 import kotlinx.coroutines.*
 
@@ -31,21 +32,19 @@ class WorkTimerService : Service() {
         // the widget picture was stuck showing the old state for up to a full minute with no
         // faster fallback. This makes the fallback immediate instead of 60s-delayed.
         scope.launch { WorkTimerGlanceWidget().updateAll(this@WorkTimerService) }
-        // Catch-up push on service start: a watch that was off, out of range or had Garmin
-        // Connect killed missed whatever was sent at the moment work actually started, and it
-        // cannot ask the phone for the state itself.
-        GarminBridge.pushCurrentState(this)
+        // No watch push here (removed in v1.30). onStartCommand also runs when the system
+        // restarts this START_STICKY service after killing it — no state change at all. Every
+        // path that actually starts the timer (MainViewModel.toggleWork, the widget's
+        // ToggleTimerAction) already pushes by itself. See GarminBridge's KDoc, point 6.
         scope.launch {
-            var tick = 0
             while (isActive) {
                 delay(60_000)
-                tick++
 
                 if (repo.autoStopIfStale(prefs)) {
                     WorkTimerGlanceWidget().updateAll(this@WorkTimerService)
                     // The 20h safety net stopped the timer without any user action — the watch
                     // would otherwise keep counting down a session that no longer exists.
-                    GarminBridge.pushCurrentState(this@WorkTimerService)
+                    GarminBridge.pushCurrentState(this@WorkTimerService, WatchPushReason.AUTO_STOP)
                     (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                         .notify(NOTIF_ID, buildNotification("Zatrzymano automatycznie po 20h — zapomniałeś wyłączyć?"))
                     stopForeground(STOP_FOREGROUND_DETACH)
@@ -62,17 +61,10 @@ class WorkTimerService : Service() {
                 (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                     .notify(NOTIF_ID, buildNotification(text))
                 WorkTimerGlanceWidget().updateAll(this@WorkTimerService)
-                // Periodic re-push, every 15 minutes rather than every minute. The watch does NOT
-                // need a tick: it anchors the countdown to its own clock when a message arrives
-                // and counts down locally, so the only jobs left for a periodic push are catching
-                // up a watch that just came back into range and correcting clock drift (seconds
-                // per day between two quartz clocks — not a per-minute problem). Every message
-                // wakes the watch face's background service, which gets a 32 KB heap and a 30s
-                // budget each time, so a 60s cadence would mean ~500 wakes per workday for
-                // nothing. 15 minutes is still well inside "I just walked back to my desk".
-                if (tick % 15 == 0) {
-                    GarminBridge.pushCurrentState(this@WorkTimerService)
-                }
+                // No periodic watch push (the 15-minute re-push was removed in v1.30): the watch
+                // counts down on its own clock, and the phone now pushes only when something
+                // changes. A watch that was out of range catches up on the next change or via
+                // the manual button in Ustawienia. See GarminBridge's KDoc, point 6.
             }
         }
         return START_STICKY

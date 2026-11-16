@@ -2,6 +2,9 @@ package com.zygabad.worktimerecorder.data
 
 import android.content.Context
 import androidx.core.content.edit
+import com.zygabad.worktimerecorder.util.WatchPushHistoryEntry
+import com.zygabad.worktimerecorder.util.parseWatchPushHistory
+import com.zygabad.worktimerecorder.util.serializeWatchPushHistory
 
 class PrefsManager(context: Context) {
     private val prefs = context.getSharedPreferences("work_timer_prefs", Context.MODE_PRIVATE)
@@ -37,6 +40,15 @@ class PrefsManager(context: Context) {
     var lastWatchPushStatus: String
         get() = prefs.getString("last_watch_push_status", "") ?: ""
         set(value) = prefs.edit { putString("last_watch_push_status", value) }
+
+    /**
+     * The last WATCH_PUSH_HISTORY_MAX push outcomes, newest first (see util/WatchPushHistory.kt).
+     * Persisted for the same reason as [lastWatchPushStatus]: pushes run from the service/widget
+     * and the history is read later in Ustawienia, possibly after the process was killed.
+     */
+    var watchPushHistory: List<WatchPushHistoryEntry>
+        get() = parseWatchPushHistory(prefs.getString("watch_push_history", null))
+        set(value) = prefs.edit { putString("watch_push_history", serializeWatchPushHistory(value)) }
 
     // Widget background color thresholds, all in minutes.
     // No stored value yet -> defaults to half of whatever the target currently is.

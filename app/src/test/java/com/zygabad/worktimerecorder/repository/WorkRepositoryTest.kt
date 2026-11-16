@@ -170,6 +170,62 @@ class WorkRepositoryTest {
         assertEquals(60, dao.sessions.single().durationMinutes)
     }
 
+    // --- cleanupCorruptedSessions reports whether it changed anything (v1.30) ---
+    // WorkTimerApplication.onCreate used to push to the watch on EVERY cold process start, which
+    // Android also does at night for the widget - a push with no state change. It now pushes only
+    // when this self-heal actually rewrote something, so that return value is the whole contract.
+
+    @Test
+    fun `cleanupCorruptedSessions reports no change on an already clean database`() = runTest {
+        val prefs = testPrefsManager()
+        val start = System.currentTimeMillis() - 60 * 60_000
+        dao.insert(WorkSession(date = today(), startTime = start, endTime = start + 60 * 60_000, durationMinutes = 60))
+        val openId = dao.insert(WorkSession(date = today(), startTime = System.currentTimeMillis() - 5 * 60_000))
+        prefs.isWorking = true
+        prefs.currentSessionId = openId
+
+        assertFalse(repo.cleanupCorruptedSessions(prefs))
+    }
+
+    @Test
+    fun `cleanupCorruptedSessions reports no change on an empty database`() = runTest {
+        assertFalse(repo.cleanupCorruptedSessions(testPrefsManager()))
+    }
+
+    @Test
+    fun `cleanupCorruptedSessions reports a change when it auto-stopped a stale session`() = runTest {
+        val prefs = testPrefsManager()
+        val openId = dao.insert(WorkSession(date = today(), startTime = System.currentTimeMillis() - 21 * 60 * 60 * 1000L))
+        prefs.isWorking = true
+        prefs.currentSessionId = openId
+
+        assertTrue(repo.cleanupCorruptedSessions(prefs))
+        assertFalse(prefs.isWorking)
+    }
+
+    @Test
+    fun `cleanupCorruptedSessions reports a change when it discarded an unowned open session`() = runTest {
+        dao.insert(WorkSession(date = today(), startTime = System.currentTimeMillis() - 60_000))
+        assertTrue(repo.cleanupCorruptedSessions(testPrefsManager()))
+    }
+
+    @Test
+    fun `cleanupCorruptedSessions reports a change when it recomputed a duration`() = runTest {
+        val start = System.currentTimeMillis() - 60 * 60_000
+        dao.insert(WorkSession(date = today(), startTime = start, endTime = start + 60 * 60_000, durationMinutes = 999))
+        assertTrue(repo.cleanupCorruptedSessions(testPrefsManager()))
+    }
+
+    @Test
+    fun `cleanupCorruptedSessions reports a change when prefs pointed at a session that no longer exists`() = runTest {
+        val prefs = testPrefsManager()
+        prefs.isWorking = true
+        prefs.currentSessionId = 42L
+
+        assertTrue(repo.cleanupCorruptedSessions(prefs))
+        assertFalse(prefs.isWorking)
+    }
+
     // --- updateSessionTimes (manual edit) ---
 
     @Test

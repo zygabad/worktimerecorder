@@ -126,14 +126,22 @@ class WorkRepository(private val dao: WorkDao) {
      * "open" (endTime == null) rows each counted live elapsed time and got summed, producing
      * impossible daily totals (tens of hours in a single day). None of that is real work time,
      * so it's discarded rather than guessed at.
+     *
+     * Returns true if it changed anything at all (a session closed, deleted or re-timed, or the
+     * running flag reset). WorkTimerApplication.onCreate pushes to the watch only then: it runs on
+     * every cold process start — Android does those at night for the widget — and a push with no
+     * state change behind it is exactly what the watch must not receive (v1.30).
      */
-    suspend fun cleanupCorruptedSessions(prefs: PrefsManager) {
-        autoStopIfStale(prefs)
+    suspend fun cleanupCorruptedSessions(prefs: PrefsManager): Boolean {
+        var changed = autoStopIfStale(prefs)
 
         val legitOpenId = if (prefs.isWorking) prefs.currentSessionId else -1L
 
         dao.getOpenSessions().forEach { session ->
-            if (session.id.toLong() != legitOpenId) dao.delete(session)
+            if (session.id.toLong() != legitOpenId) {
+                dao.delete(session)
+                changed = true
+            }
         }
 
         dao.getAllSessions().forEach { session ->
@@ -141,8 +149,10 @@ class WorkRepository(private val dao: WorkDao) {
             val recomputed = ((end - session.startTime) / 60_000).toInt()
             if (session.startTime <= 0 || end < session.startTime || recomputed > MAX_SESSION_MINUTES) {
                 dao.delete(session)
+                changed = true
             } else if (recomputed != session.durationMinutes) {
                 dao.update(session.copy(durationMinutes = recomputed))
+                changed = true
             }
         }
 
@@ -151,6 +161,8 @@ class WorkRepository(private val dao: WorkDao) {
             prefs.isWorking = false
             prefs.currentSessionStart = -1L
             prefs.currentSessionId = -1L
+            changed = true
         }
+        return changed
     }
 }

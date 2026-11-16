@@ -14,6 +14,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.zygabad.worktimerecorder.util.WatchPushReason
+import com.zygabad.worktimerecorder.util.formatWatchPushHistoryLine
 
 @Composable
 private fun HourMinuteFields(
@@ -112,7 +114,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                     selected = currentTarget == 480,
                     onClick = {
                         hours = "8"; minutes = "0"; vm.prefs.targetWorkMinutes = 480; saved = true
-                        vm.pushStateToWatch()
+                        vm.pushStateToWatch(WatchPushReason.TARGET)
                     },
                     label = { Text("8h") }
                 )
@@ -120,7 +122,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                     selected = currentTarget == 510,
                     onClick = {
                         hours = "8"; minutes = "30"; vm.prefs.targetWorkMinutes = 510; saved = true
-                        vm.pushStateToWatch()
+                        vm.pushStateToWatch(WatchPushReason.TARGET)
                     },
                     label = { Text("8h 30m") }
                 )
@@ -156,7 +158,7 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                     saved = true
                     // Every target change has to reach the watch face: its whole display is
                     // derived from the target (finish clock, remaining, overtime).
-                    vm.pushStateToWatch()
+                    vm.pushStateToWatch(WatchPushReason.TARGET)
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Zapisz") }
@@ -294,9 +296,11 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
             Text("Zegarek", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Stan ostatniej próby wysłania danych na tarczę Pro Stat. Telefon wysyła sam " +
-                "przy starcie/stopie licznika i co 15 minut — poniżej widać, co się stało " +
-                "ostatnim razem. Jeśli na zegarku nic nie ma, naciśnij przycisk i odczekaj " +
-                "kilka sekund: linijka odświeży się sama.",
+                "tylko wtedy, gdy coś się zmienia (start/stop, edycja sesji, zmiana celu) — " +
+                "poniżej widać, co się stało ostatnim razem. Jeśli na zegarku nic nie ma, " +
+                "naciśnij przycisk i odczekaj kilka sekund: linijka odświeży się sama. " +
+                "Jeśli zegarek pokazuje starszy stan niż telefon, użyj „Wyczyść kolejkę " +
+                "zegarka” (ok. minuty).",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -315,6 +319,46 @@ fun SettingsScreen(navController: NavController, vm: MainViewModel = viewModel()
                 onClick = { vm.pushStateToWatchNow() },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Wyślij do zegarka teraz") }
+            val draining by vm.watchQueueDrainRunning.collectAsState()
+            OutlinedButton(
+                // GarminBridge ignores a second request while a drain runs anyway; disabling the
+                // button just makes that visible.
+                onClick = { vm.drainWatchQueue() },
+                enabled = !draining,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (draining) "Czyszczenie kolejki trwa…" else "Wyczyść kolejkę zegarka") }
+
+            // Push history. Deliberately trivial: every decision about WHAT is listed and HOW a
+            // line reads lives in util/WatchPushHistory.kt (covered by WatchPushHistoryTest). This
+            // composable itself is NOT covered by any test — the module has no Compose test /
+            // Robolectric / instrumentation setup.
+            val history by vm.watchPushHistory.collectAsState()
+            var historyExpanded by remember { mutableStateOf(false) }
+            TextButton(onClick = { historyExpanded = !historyExpanded }) {
+                Text(
+                    (if (historyExpanded) "▾ " else "▸ ") +
+                        "Historia wysylek (${history.orEmpty().size})"
+                )
+            }
+            if (historyExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val entries = history.orEmpty()
+                    if (entries.isEmpty()) {
+                        Text(
+                            "brak wpisow",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    entries.forEach { entry ->
+                        Text(
+                            formatWatchPushHistoryLine(entry),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
 
             HorizontalDivider()
             val context = LocalContext.current

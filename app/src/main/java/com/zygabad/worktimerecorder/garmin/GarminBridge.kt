@@ -8,12 +8,22 @@ import com.garmin.android.connectiq.IQDevice
 import com.zygabad.worktimerecorder.data.PrefsManager
 import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.repository.WorkRepository
+import com.zygabad.worktimerecorder.util.WatchPushHistoryEntry
 import com.zygabad.worktimerecorder.util.WatchPushOutcome
+import com.zygabad.worktimerecorder.util.WatchPushReason
+import com.zygabad.worktimerecorder.util.WatchQueueDrainGate
+import com.zygabad.worktimerecorder.util.appendWatchPushHistory
+import com.zygabad.worktimerecorder.util.buildWatchPushHistoryEntry
 import com.zygabad.worktimerecorder.util.describeThrowable
 import com.zygabad.worktimerecorder.util.summarizeWatchPayload
 import com.zygabad.worktimerecorder.util.buildWatchPayload
 import com.zygabad.worktimerecorder.util.formatWatchPushStatus
+import com.zygabad.worktimerecorder.util.isDrainSendDelivered
+import com.zygabad.worktimerecorder.util.runWatchQueueDrain
 import com.zygabad.worktimerecorder.util.shouldRetrySdkInit
+import com.zygabad.worktimerecorder.util.watchQueueDrainProgressText
+import com.zygabad.worktimerecorder.util.watchQueueDrainReasonLabel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,6 +35,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -45,14 +57,15 @@ import kotlin.coroutines.resume
  *
  * 2. autoUI is false on initialize(). Garmin's `true` option pops a dialog telling the user to
  *    install/upgrade Garmin Connect Mobile — but we send from a foreground Service, from the
- *    Glance widget's ToggleTimerAction and from Application.onCreate, where there is no Activity
+ *    Glance widget's ToggleTimerAction and (after a cold-start self-heal that changed something)
+ *    from Application.onCreate, where there is no Activity
  *    in front to host a dialog, so a prompt would be either impossible or a surprise overlay on
  *    whatever the user is actually doing. Failing silently is the right behaviour here.
  *
- * 3. Sends are coalesced on the trailing edge of a 1s window. Starting work fires several state
- *    changes almost at once (widget toggle -> DB write -> foreground service start -> widget
- *    refresh); only the LAST state is worth sending, and the SDK round-trip is slow enough that
- *    firing all of them would queue redundant BLE traffic.
+ * 3. Sends are coalesced on the trailing edge of a 1s window. A burst of changes (e.g. a session
+ *    edit followed at once by a target tap) should go out as ONE message carrying the LAST state;
+ *    the SDK round-trip is slow enough that firing all of them would queue redundant BLE traffic.
+ *    [drainWatchQueue] deliberately bypasses this (see point 7).
  *
  * 4. The payload goes to EVERY known device that is CONNECTED, instead of guessing "the first
  *    device". Guessing silently loses the feature for anyone with more than one Garmin paired (an
@@ -64,6 +77,26 @@ import kotlin.coroutines.resume
  *    every exit path now also records a one-line Polish outcome (util/WatchPushStatus.kt) into
  *    PrefsManager, where Ustawienia → Zegarek shows it and the manual "Wyslij do zegarka teraz"
  *    button can refresh it. Recording is itself best-effort and never throws into the caller.
+ *    Since v1.30 every outcome also goes into a 20-entry history with the push's reason and
+ *    message id (util/WatchPushHistory.kt), shown under the status line.
+ *
+ * 6. Push ONLY on change (v1.30, the user's explicit choice). Callers push when something the watch
+ *    shows actually changed: start, stop, a session edit/delete/back-fill, a target change, the 20h
+ *    auto-stop, a cold-start self-heal that rewrote data — plus the two buttons in Ustawienia. The
+ *    old 15-minute re-push from the service, the unconditional push from Application.onCreate (which
+ *    Android runs at night for the widget) and the push on every service (re)start are gone.
+ *    Accepted trade-off: a watch that was out of range when the state changed only catches up on
+ *    the next change or the manual button.
+ *
+ * 7. The watch may hold a BACKLOG. Field observation, not documented Garmin behaviour: on
+ *    2026-11-13 each manual push made the watch show an OLDER message than the one just sent
+ *    (about a dozen behind); on 2026-11-16 it kept Sunday's stopped-state message for ~20 minutes
+ *    after work started until the button had been pressed about a dozen times; its mailbox file
+ *    (GARMIN/Apps/MAIL/ProStat.MBX) grew from 5560 to 6712 bytes over a day. ⚠️ Working
+ *    hypothesis, not confirmed: messages pile up in a watch-side queue and the watch hands ONE
+ *    queued message to the face per NEW arrival, so a backlog of N leaves the face N pushes stale
+ *    until N more arrive. [drainWatchQueue] automates the user's workaround: a burst of fresh
+ *    snapshots, sent one by one without coalescing, the last being the true current state.
  */
 object GarminBridge {
 
@@ -87,7 +120,34 @@ object GarminBridge {
      * CONFLATED: a newer state simply overwrites an older unsent one — exactly the semantics we
      * want, since the payload is a full snapshot and an outdated snapshot has no value.
      */
-    private val requests = Channel<Map<String, Any>>(Channel.CONFLATED)
+    private val requests = Channel<PushRequest>(Channel.CONFLATED)
+
+    /** One queued push: the snapshot plus why it was made, for the history. */
+    private class PushRequest(val payload: Map<String, Any>, val reason: WatchPushReason)
+
+    /**
+     * What a recorded outcome belongs to: the history line's reason label and the payload whose
+     * "mid" it shows (null when no payload was built).
+     */
+    private class PushContext(val reasonLabel: String, val payload: Map<String, Any>?)
+
+    /**
+     * Serializes every deliver() call. Before v1.30 only the pump called it, so the lazy SDK state
+     * (connectIQ/sdkReady) needed no lock; the drain is a second caller, and this keeps that
+     * single-caller guarantee true.
+     */
+    private val deliveryMutex = Mutex()
+
+    private val drainGate = WatchQueueDrainGate()
+    private val _drainRunning = MutableStateFlow(false)
+
+    /** True while [drainWatchQueue] runs, so Ustawienia can disable its button. */
+    val drainRunning: StateFlow<Boolean> = _drainRunning.asStateFlow()
+
+    private val historyLock = Any()
+
+    /** In-process mirror of PrefsManager.watchPushHistory, same reasoning as [_lastPushStatus]. */
+    private val _pushHistory = MutableStateFlow<List<WatchPushHistoryEntry>?>(null)
     private val pumpLock = Any()
     private var pump: Job? = null
 
@@ -103,7 +163,7 @@ object GarminBridge {
      * toggle would pay the full init timeout again for a user who simply has no Garmin account.
      *
      * This used to be a plain Boolean that was never cleared, and that was a day-long kill switch:
-     * the FIRST push of the process runs from WorkTimerApplication.onCreate, i.e. at phone cold
+     * the FIRST push of the process ran (until v1.30, unconditionally) from WorkTimerApplication.onCreate, i.e. at phone cold
      * start, which is exactly when Garmin Connect Mobile is most likely to be mid-update,
      * force-stopped or battery-restricted — all of which surface as GCM_NOT_INSTALLED. The
      * foreground service then keeps this process alive for the whole workday, so one bad answer
@@ -155,15 +215,58 @@ object GarminBridge {
      * strictly less than the timer, so a failing SharedPreferences write must not take down the
      * push (or the pump) with it.
      */
-    private fun record(appContext: Context, outcome: WatchPushOutcome) {
+    private fun record(appContext: Context, outcome: WatchPushOutcome, context: PushContext) {
         try {
-            val line = formatWatchPushStatus(outcome, System.currentTimeMillis())
-            PrefsManager(appContext).lastWatchPushStatus = line
+            val now = System.currentTimeMillis()
+            val line = formatWatchPushStatus(outcome, now)
+            val prefs = PrefsManager(appContext)
+            prefs.lastWatchPushStatus = line
             _lastPushStatus.value = line
-            Log.i(TAG, line)
+            val entry = buildWatchPushHistoryEntry(outcome, context.reasonLabel, context.payload, now)
+            // Read-modify-write of one prefs value from several coroutines (pump, drain, the
+            // payload-build failure path): serialized so no entry is lost to a race.
+            synchronized(historyLock) {
+                val updated = appendWatchPushHistory(prefs.watchPushHistory, entry)
+                prefs.watchPushHistory = updated
+                _pushHistory.value = updated
+            }
+            Log.i(TAG, "[${context.reasonLabel}] $line")
         } catch (t: Throwable) {
             Log.w(TAG, "Could not record the watch diagnostic", t)
         }
+    }
+
+    /**
+     * Live view of the push history, newest first; seeded from prefs on first use so it survives
+     * the process being killed.
+     */
+    fun observePushHistory(context: Context): StateFlow<List<WatchPushHistoryEntry>?> {
+        if (_pushHistory.value == null) {
+            _pushHistory.value = try {
+                PrefsManager(context.applicationContext).watchPushHistory
+            } catch (t: Throwable) {
+                emptyList()
+            }
+        }
+        return _pushHistory.asStateFlow()
+    }
+
+    /**
+     * Builds the snapshot from the DB + prefs right now. Shared by the normal push and every drain
+     * send, so each drain message carries its own ts/mid and the last one is the true current state.
+     */
+    private suspend fun buildCurrentPayload(appContext: Context): Map<String, Any> {
+        val prefs = PrefsManager(appContext)
+        val repo = WorkRepository(WorkDatabase.getDatabase(appContext).workDao())
+        // getTodayMinutes() is the same cumulative total the main screen and the widget
+        // show (sessions already closed today + the live one), so the watch's countdown
+        // agrees with the phone even after a break — see WorkRepository's own comment.
+        return buildWatchPayload(
+            isWorking = repo.isWorkInProgress(),
+            workedMinutes = repo.getTodayMinutes(),
+            targetMinutes = prefs.targetWorkMinutes,
+            nowMillis = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -171,30 +274,99 @@ object GarminBridge {
      * Fire-and-forget by design — callers (ViewModel, Service, widget action) must not have to
      * care how long the watch takes or whether it answered at all.
      *
+     * [reason] says why the push happens; it ends up in the push history. Call this ONLY when
+     * something the watch shows changed (or the user asked) — see point 6 in the class KDoc.
+     *
      * [manual] marks a push the user explicitly asked for (the Ustawienia button): it additionally
      * clears the "Garmin Connect is unavailable" latch so the attempt really is a fresh one.
      */
-    fun pushCurrentState(context: Context, manual: Boolean = false) {
+    fun pushCurrentState(context: Context, reason: WatchPushReason, manual: Boolean = false) {
         val appContext = context.applicationContext
         if (manual) forceInitRetry = true
+        Log.i(TAG, "Push requested: ${reason.label}")
         scope.launch {
             try {
-                val prefs = PrefsManager(appContext)
-                val repo = WorkRepository(WorkDatabase.getDatabase(appContext).workDao())
-                // getTodayMinutes() is the same cumulative total the main screen and the widget
-                // show (sessions already closed today + the live one), so the watch's countdown
-                // agrees with the phone even after a break — see WorkRepository's own comment.
-                val payload = buildWatchPayload(
-                    isWorking = repo.isWorkInProgress(),
-                    workedMinutes = repo.getTodayMinutes(),
-                    targetMinutes = prefs.targetWorkMinutes,
-                    nowMillis = System.currentTimeMillis()
-                )
-                requests.trySend(payload)
+                requests.trySend(PushRequest(buildCurrentPayload(appContext), reason))
                 ensurePump(appContext)
             } catch (t: Throwable) {
                 Log.w(TAG, "Could not build the watch payload — skipping this push", t)
-                record(appContext, WatchPushOutcome.PayloadBuildFailed)
+                record(appContext, WatchPushOutcome.PayloadBuildFailed, PushContext(reason.label, null))
+            }
+        }
+    }
+
+    /**
+     * "Wyczysc kolejke zegarka": sends WATCH_QUEUE_DRAIN_COUNT freshly built snapshots,
+     * WATCH_QUEUE_DRAIN_SPACING_MS apart, straight through [deliver] — NOT through the coalescing
+     * pump, which would collapse the burst into one message and defeat the point (class KDoc,
+     * point 7). The status line shows progress while it runs; the per-send outcomes are not
+     * recorded one by one (30 lines would push everything else out of the history). When it ends,
+     * the LAST send's outcome is recorded once, with a reason like "czyszczenie 30/30" or
+     * "czyszczenie przerwane 3/30". Stops at the first send that does not get a SUCCESS. A second
+     * call while one is running is ignored. Loop rules: util/WatchQueueDrain.kt (tested).
+     */
+    fun drainWatchQueue(context: Context) {
+        val appContext = context.applicationContext
+        if (!drainGate.tryStart()) {
+            Log.i(TAG, "Queue drain already running — ignoring the second request")
+            return
+        }
+        _drainRunning.value = true
+        // A user-initiated action, like the manual push: give the SDK a fresh chance.
+        forceInitRetry = true
+        scope.launch {
+            var lastPayload: Map<String, Any>? = null
+            var lastOutcomes: List<WatchPushOutcome> = emptyList()
+            try {
+                val result = runWatchQueueDrain(
+                    onProgress = { sent, total ->
+                        val text = watchQueueDrainProgressText(sent, total)
+                        _lastPushStatus.value = text
+                        Log.i(TAG, text)
+                    }
+                ) { _ ->
+                    val payload = try {
+                        buildCurrentPayload(appContext)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Could not build the watch payload during the drain", t)
+                        lastPayload = null
+                        lastOutcomes = listOf(WatchPushOutcome.PayloadBuildFailed)
+                        return@runWatchQueueDrain false
+                    }
+                    lastPayload = payload
+                    lastOutcomes = try {
+                        deliveryMutex.withLock { deliver(appContext, payload) { } }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Watch delivery failed during the drain", t)
+                        listOf(
+                            WatchPushOutcome.DeliveryCrashed(
+                                describeThrowable(t.javaClass.simpleName, t.message)
+                            )
+                        )
+                    }
+                    isDrainSendDelivered(lastOutcomes)
+                }
+                val pushContext = PushContext(watchQueueDrainReasonLabel(result), lastPayload)
+                val toRecord = lastOutcomes.ifEmpty {
+                    // deliver() records at least one outcome on every path today; this only keeps
+                    // the progress text from being left on screen forever if that ever changes.
+                    listOf(WatchPushOutcome.DeliveryCrashed("brak wyniku"))
+                }
+                toRecord.forEach { record(appContext, it, pushContext) }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Queue drain crashed", t)
+                record(
+                    appContext,
+                    WatchPushOutcome.DeliveryCrashed(describeThrowable(t.javaClass.simpleName, t.message)),
+                    PushContext(WatchPushReason.DRAIN.label, lastPayload)
+                )
+            } finally {
+                drainGate.finish()
+                _drainRunning.value = false
             }
         }
     }
@@ -208,14 +380,18 @@ object GarminBridge {
         synchronized(pumpLock) {
             if (pump?.isActive == true) return
             pump = scope.launch {
-                for (firstPayload in requests) {
+                for (firstRequest in requests) {
                     // Trailing edge: let the burst settle, then take whatever is newest. A lone
                     // push therefore lands ~1s late, which is invisible on a watch face and is
-                    // the price of never sending a state that was already superseded.
+                    // the price of never sending a state that was already superseded. The newest
+                    // request's reason is the one the history shows.
                     delay(COALESCE_WINDOW_MS)
-                    val payload = requests.tryReceive().getOrNull() ?: firstPayload
+                    val request = requests.tryReceive().getOrNull() ?: firstRequest
+                    val pushContext = PushContext(request.reason.label, request.payload)
                     try {
-                        deliver(appContext, payload)
+                        deliveryMutex.withLock {
+                            deliver(appContext, request.payload) { record(appContext, it, pushContext) }
+                        }
                     } catch (t: Throwable) {
                         // Must never let the pump die — the next toggle would then be mute.
                         Log.w(TAG, "Watch delivery failed", t)
@@ -225,7 +401,8 @@ object GarminBridge {
                             appContext,
                             WatchPushOutcome.DeliveryCrashed(
                                 describeThrowable(t.javaClass.simpleName, t.message)
-                            )
+                            ),
+                            pushContext
                         )
                     }
                 }
@@ -233,8 +410,22 @@ object GarminBridge {
         }
     }
 
-    private suspend fun deliver(appContext: Context, payload: Map<String, Any>) {
-        val ciq = ensureSdkReady(appContext) ?: return
+    /**
+     * One delivery of [payload] to every connected device. Every outcome goes to [report] as it
+     * happens (the pump records them; the drain only collects) and is also returned, so the drain
+     * can decide whether to go on. Callers must hold [deliveryMutex].
+     */
+    private suspend fun deliver(
+        appContext: Context,
+        payload: Map<String, Any>,
+        report: (WatchPushOutcome) -> Unit
+    ): List<WatchPushOutcome> {
+        val outcomes = mutableListOf<WatchPushOutcome>()
+        val emit: (WatchPushOutcome) -> Unit = { outcome ->
+            outcomes += outcome
+            report(outcome)
+        }
+        val ciq = ensureSdkReady(appContext, emit) ?: return outcomes
 
         // getKnownDevices() lists everything paired in Garmin Connect Mobile, connected or not;
         // getConnectedDevices() would be shorter but has been less reliable in practice about
@@ -243,14 +434,14 @@ object GarminBridge {
             ciq.knownDevices ?: emptyList()
         } catch (t: Throwable) {
             Log.i(TAG, "No known Garmin devices available: ${t.javaClass.simpleName}")
-            record(appContext, WatchPushOutcome.NoKnownDevices)
-            return
+            emit(WatchPushOutcome.NoKnownDevices)
+            return outcomes
         }
 
         if (devices.isEmpty()) {
             Log.i(TAG, "No Garmin device paired in Garmin Connect — nothing to push to")
-            record(appContext, WatchPushOutcome.NoKnownDevices)
-            return
+            emit(WatchPushOutcome.NoKnownDevices)
+            return outcomes
         }
 
         // With several devices the LAST recorded outcome wins, which is the useful one in
@@ -260,7 +451,7 @@ object GarminBridge {
                 val status = ciq.getDeviceStatus(device)
                 if (status != IQDevice.IQDeviceStatus.CONNECTED) {
                     Log.i(TAG, "Skipping ${device.friendlyName}: $status")
-                    record(appContext, WatchPushOutcome.DeviceNotConnected(device.friendlyName, status?.name))
+                    emit(WatchPushOutcome.DeviceNotConnected(device.friendlyName, status?.name))
                     continue
                 }
 
@@ -283,13 +474,12 @@ object GarminBridge {
                 if (!installed) {
                     Log.i(TAG, "Pro Stat reported as not installed on ${device.friendlyName} " +
                         "(${app?.status}) — sending anyway")
-                    record(appContext, WatchPushOutcome.AppNotInstalled(device.friendlyName, app?.status?.name))
+                    emit(WatchPushOutcome.AppNotInstalled(device.friendlyName, app?.status?.name))
                 }
 
                 val target = app ?: IQApp(PRO_STAT_APP_ID)
                 val answer = sendPayload(ciq, device, target, payload)
-                record(
-                    appContext,
+                emit(
                     if (answer == null) {
                         WatchPushOutcome.SendTimedOut(device.friendlyName, attemptedAnyway = !installed)
                     } else {
@@ -303,12 +493,13 @@ object GarminBridge {
                 )
             } catch (t: Throwable) {
                 // One unhappy device must not stop the others from getting the update.
+                // Cancellation (the scope going away) is not a device failure — let it end the call.
+                if (t is CancellationException) throw t
                 Log.w(TAG, "Push to ${device.friendlyName} failed", t)
                 // Deliberately NOT DeviceNotConnected: rendering an exception class name where a
                 // IQDeviceStatus belongs would read as "the watch reported this state", and the
                 // whole value of this line is that it says what actually happened.
-                record(
-                    appContext,
+                emit(
                     WatchPushOutcome.DevicePushCrashed(
                         device.friendlyName,
                         describeThrowable(t.javaClass.simpleName, t.message)
@@ -316,9 +507,13 @@ object GarminBridge {
                 )
             }
         }
+        return outcomes
     }
 
-    private suspend fun ensureSdkReady(appContext: Context): ConnectIQ? {
+    private suspend fun ensureSdkReady(
+        appContext: Context,
+        report: (WatchPushOutcome) -> Unit
+    ): ConnectIQ? {
         val manual = forceInitRetry
         if (manual) {
             forceInitRetry = false
@@ -326,7 +521,7 @@ object GarminBridge {
         if (!shouldRetrySdkInit(sdkUnavailableSince, System.currentTimeMillis(), manual)) {
             // Report the latched reason again (marked as remembered) instead of returning in
             // silence: "nothing happened at all" is the one answer that helps nobody.
-            record(appContext, WatchPushOutcome.SdkInitFailed(lastInitError, remembered = true))
+            report(WatchPushOutcome.SdkInitFailed(lastInitError, remembered = true))
             return null
         }
         sdkUnavailableSince = null
@@ -390,18 +585,17 @@ object GarminBridge {
             when (ready) {
                 true -> connectIQ
                 false -> {
-                    record(appContext, WatchPushOutcome.SdkInitFailed(initError))
+                    report(WatchPushOutcome.SdkInitFailed(initError))
                     null
                 }
                 null -> {
-                    record(appContext, WatchPushOutcome.SdkInitTimedOut)
+                    report(WatchPushOutcome.SdkInitTimedOut)
                     null
                 }
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Connect IQ initialization threw", t)
-            record(
-                appContext,
+            report(
                 WatchPushOutcome.SdkInitFailed(describeThrowable(t.javaClass.simpleName, t.message))
             )
             null

@@ -30,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.zygabad.worktimerecorder.data.DayLocationType
 import com.zygabad.worktimerecorder.data.WorkSession
+import com.zygabad.worktimerecorder.util.WatchPushReason
 import com.zygabad.worktimerecorder.util.formatFinishClock
 import java.time.Instant
 import java.time.LocalDate
@@ -239,7 +240,7 @@ fun MainScreen(navController: NavController, vm: MainViewModel = viewModel()) {
                                             vm.prefs.targetWorkMinutes = presetMin
                                             // A new target moves the finish time, which is the
                                             // single number the watch face exists to show.
-                                            vm.pushStateToWatch()
+                                            vm.pushStateToWatch(WatchPushReason.TARGET)
                                         },
                                         shape = RoundedCornerShape(16.dp),
                                         color = if (selected) statusContent.copy(alpha = 0.2f) else Color.Transparent,

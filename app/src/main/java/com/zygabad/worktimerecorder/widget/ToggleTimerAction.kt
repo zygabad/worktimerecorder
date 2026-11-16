@@ -11,6 +11,7 @@ import com.zygabad.worktimerecorder.data.WorkDatabase
 import com.zygabad.worktimerecorder.garmin.GarminBridge
 import com.zygabad.worktimerecorder.repository.WorkRepository
 import com.zygabad.worktimerecorder.service.WorkTimerService
+import com.zygabad.worktimerecorder.util.WatchPushReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,9 +91,12 @@ class ToggleTimerAction : ActionCallback {
 
             // The watch face needs the new state too, and the widget is the usual way work
             // gets started/stopped — wiring only the in-app button would leave the watch stale
-            // for the common case. GarminBridge coalesces this with the push the foreground
-            // service makes a moment later, so only the final state goes out.
-            GarminBridge.pushCurrentState(context)
+            // for the common case. This is THE push for a widget start/stop: since v1.30 the
+            // foreground service no longer pushes when it starts.
+            GarminBridge.pushCurrentState(
+                context,
+                if (prefs.isWorking) WatchPushReason.START else WatchPushReason.STOP
+            )
 
             // Belt-and-suspenders: re-push shortly after in case the widget host coalesces/drops
             // an update that lands in the same instant as the foreground-service transition above.

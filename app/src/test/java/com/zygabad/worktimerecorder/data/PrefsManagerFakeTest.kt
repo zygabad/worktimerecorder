@@ -4,6 +4,7 @@ import com.zygabad.worktimerecorder.testutil.testPrefsManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
+import com.zygabad.worktimerecorder.util.WatchPushHistoryEntry
 
 /**
  * Sanity check for the fake-SharedPreferences-backed PrefsManager test double itself: if this
@@ -36,6 +37,23 @@ class PrefsManagerFakeTest {
         // A later attempt overwrites: only the newest outcome is of any use.
         prefs.lastWatchPushStatus = "14:47 — Forerunner 955: NOT_CONNECTED"
         assertEquals("14:47 — Forerunner 955: NOT_CONNECTED", prefs.lastWatchPushStatus)
+    }
+
+    /**
+     * The push history has to survive the process being killed for the same reason as the status
+     * line above: pushes run from the service/widget, the history is read later in Ustawienia.
+     */
+    @Test
+    fun `watch push history defaults to empty and round-trips through storage`() {
+        val prefs = testPrefsManager()
+        assertEquals(emptyList<WatchPushHistoryEntry>(), prefs.watchPushHistory)
+
+        val history = listOf(
+            WatchPushHistoryEntry("08:07:31", "start", "wyslano do fenix 7 (SUCCESS) | praca: tak", "261116080731"),
+            WatchPushHistoryEntry("22:01:00", "reczne", "fenix 7: NOT_CONNECTED", null)
+        )
+        prefs.watchPushHistory = history
+        assertEquals(history, prefs.watchPushHistory)
     }
 
     @Test
